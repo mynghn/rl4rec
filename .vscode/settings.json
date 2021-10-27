@@ -1,0 +1,22 @@
+{
+    "python.linting.flake8Enabled": true,
+    "python.linting.pylintEnabled": false,
+    "python.linting.enabled": true,
+    "python.linting.flake8Args": [
+        "--max-line-length=120",
+        "--ignore=E203",
+        "--ignore=W503"
+    ],
+    "python.sortImports.args": ["--atomic"],
+    "python.sortImports.path": "isort",
+    "python.defaultInterpreterPath": "/Library/Frameworks/Python.framework/Versions/3.9/bin/python3",
+    "python.pythonPath": "/Library/Frameworks/Python.framework/Versions/3.9/bin/python3",
+    "python.formatting.provider": "black",
+    "[python]": {
+        "editor.tabSize": 4,
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave":{ 
+            "source.organizeImports": true
+        }
+    }
+}
