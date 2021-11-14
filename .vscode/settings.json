@@ -9,8 +9,8 @@
     ],
     "python.sortImports.args": ["--atomic"],
     "python.sortImports.path": "isort",
-    "python.defaultInterpreterPath": "/Library/Frameworks/Python.framework/Versions/3.9/bin/python3",
-    "python.pythonPath": "/Library/Frameworks/Python.framework/Versions/3.9/bin/python3",
+    "python.defaultInterpreterPath": "./.venv/bin/python3",
+    "python.pythonPath": "./.venv/bin/python3",
     "python.formatting.provider": "black",
     "[python]": {
         "editor.tabSize": 4,
