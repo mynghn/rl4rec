@@ -5,9 +5,10 @@ description = "Reinforcement Learning for Cross Domain Recommendation"
 authors = ["Myounghoon Lee <lmhchris47@snu.ac.kr>"]
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = ">=3.9,<3.11"
 pyspark = "^3.2.0"
 torch = "^1.10.0"
+numpy = "^1.21.4"
 
 [tool.poetry.dev-dependencies]
 flake8 = "^4.0.1"
