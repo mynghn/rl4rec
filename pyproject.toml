@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "rl4cdr"
+version = "0.1.0"
+description = "Reinforcement Learning for Cross Domain Recommendation"
+authors = ["Myounghoon Lee <lmhchris47@snu.ac.kr>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+pyspark = "^3.2.0"
+torch = "^1.10.0"
+
+[tool.poetry.dev-dependencies]
+flake8 = "^4.0.1"
+isort = "^5.10.1"
+black = "^21.10b0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
