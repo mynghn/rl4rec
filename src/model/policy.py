@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 
-class ActionPolicy(nn.Module):
+class SoftmaxStochasticPolicy(nn.Module):
     def __init__(
         self,
         num_actions: int,
@@ -13,7 +13,7 @@ class ActionPolicy(nn.Module):
         softmax_cutoffs: Sequence = None,
         softmax_temperature: float = 1.0,
     ):
-        super(ActionPolicy, self).__init__()
+        super(SoftmaxStochasticPolicy, self).__init__()
 
         self.action_space = torch.range(num_actions)
         self.action_embeddings = nn.Embedding(
@@ -35,7 +35,7 @@ class ActionPolicy(nn.Module):
     def forward(self, user_state: torch.Tensor) -> torch.Tensor:
         assert user_state.size(1) == self.action_embeddings.weight.size(
             1
-        ), "User state & action embedding should have same size."
+        ), "User state & action embedding should have same size of dimensions."
 
         actions_embedded = self.action_embeddings(self.action_space)
 
