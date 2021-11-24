@@ -32,15 +32,15 @@ class SoftmaxStochasticPolicy(nn.Module):
             self.softmax = nn.Softmax(dim=1)
         self.T = softmax_temperature
 
-    def forward(self, user_state: torch.Tensor) -> torch.Tensor:
-        assert user_state.size(1) == self.action_embeddings.weight.size(
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        assert state.size(1) == self.action_embeddings.weight.size(
             1
         ), "User state & action embedding should have same size of dimensions."
 
         actions_embedded = self.action_embeddings(self.action_space)
 
         logits = torch.stack(
-            torch.sum(s * actions_embedded / self.T, dim=1) for s in user_state
+            torch.sum(s * actions_embedded / self.T, dim=1) for s in state
         )
         if self.adaptive_softmax is True:
             action_probs = self.softmax(logits, self.action_space).output
