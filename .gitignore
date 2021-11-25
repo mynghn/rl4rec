@@ -1,2 +1,4 @@
 poetry.toml
 data
+__pycache__
+jupyter
