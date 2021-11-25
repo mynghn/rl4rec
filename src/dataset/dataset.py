@@ -2,7 +2,7 @@ import datetime
 import os
 from typing import List, Optional
 
-import torch
+import numpy as np
 from pyspark.sql import SparkSession
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.functions import (
@@ -78,7 +78,7 @@ class AmazonReviewDataset(Dataset):
         )
 
         self.item_index_map: DataFrame = self._build_item_index_map()
-        self.data: torch.Tensor = self._build_episodic_data()
+        self.data: np.ndarray = self._build_episodic_data()
 
     def _get_ratings_df(self, json_path):
         raw = self.spark.read.schema(self.ratings_fetching_schema).json(json_path)
@@ -134,12 +134,12 @@ class AmazonReviewDataset(Dataset):
     @staticmethod
     @udf(FloatType())
     def _compute_return(rewards: List[float], discount_factor: float) -> float:
-        gammas = (1.0 - discount_factor) ** torch.range(0, len(rewards) - 1)
-        return (gammas @ torch.Tensor(rewards)).item()
+        gammas = (1.0 - discount_factor) ** np.arange(len(rewards))
+        return float(gammas @ np.array(rewards))
 
-    def _build_episodic_data(self) -> torch.Tensor:
+    def _build_episodic_data(self) -> np.ndarray:
         episodes_df = (
-            self.ratings_df.join(self.item_index_map, ["asin"])
+            self.ratings.join(self.item_index_map, ["asin"])
             .withColumn(
                 "user_history",
                 collect_list("item_index").over(
@@ -164,14 +164,14 @@ class AmazonReviewDataset(Dataset):
             .select("user_history", "return")
         )
 
-        episodic_samples = torch.Tensor(
-            [[row["user_history"], row["return"]] for row in episodes_df.collect()]
+        episodic_samples = np.array(
+            [(row["user_history"], row["return"]) for row in episodes_df.collect()]
         )
 
         return episodic_samples
 
     def __len__(self):
-        return self.ratings.count()
+        return len(self.data)
 
     def __getitem__(self, idx):
         user_history, _return = self.data[idx]
