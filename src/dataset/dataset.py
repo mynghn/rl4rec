@@ -103,8 +103,8 @@ class AmazonReviewDataset(Dataset):
 
         return preprocessed
 
-    @udf(StringType())
     @staticmethod
+    @udf(StringType())
     def _filter_movies_and_tv_brand_column(brand: str) -> Optional[str]:
         lowered = brand.lower()
         no_info = (
@@ -131,8 +131,8 @@ class AmazonReviewDataset(Dataset):
             .withColumn("item_index", monotonically_increasing_id())
         )
 
-    @udf(FloatType())
     @staticmethod
+    @udf(FloatType())
     def _compute_return(rewards: List[float], discount_factor: float) -> float:
         gammas = (1.0 - discount_factor) ** torch.range(0, len(rewards) - 1)
         return (gammas @ torch.Tensor(rewards)).item()
