@@ -60,9 +60,9 @@ class AmazonReviewDataset(Dataset):
         data_path: str,
         category_name: str,
         spark: SparkSession,
-        start_date: datetime.date,
-        end_date: datetime.date,
         discount_factor: float,
+        start_date: datetime.date = None,
+        end_date: datetime.date = None,
     ):
         self.spark = spark
         self.category_name = category_name
@@ -83,9 +83,15 @@ class AmazonReviewDataset(Dataset):
     def _get_ratings_df(self, json_path):
         raw = self.spark.read.schema(self.ratings_fetching_schema).json(json_path)
 
-        preprocessed = raw.withColumn(
-            "timestamp", from_unixtime("unixReviewTime")
-        ).filter(col("timestamp").cast("date").between(self.start_date, self.end_date))
+        preprocessed = raw.withColumn("timestamp", from_unixtime("unixReviewTime"))
+        if self.start_date:
+            preprocessed = preprocessed.filter(
+                col("timestamp").cast("date") >= self.start_date
+            )
+        if self.end_date:
+            preprocessed = preprocessed.filter(
+                col("timestamp").cast("date") <= self.end_date
+            )
 
         return preprocessed
 
