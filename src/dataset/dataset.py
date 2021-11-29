@@ -26,7 +26,7 @@ from pyspark.sql.types import (
     StructType,
 )
 from pyspark.sql.window import Window as W
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 
 
 class AmazonReviewDataset(Dataset):
@@ -182,3 +182,12 @@ class AmazonReviewDataset(Dataset):
     def __getitem__(self, idx):
         user_history, _return = self.data[idx]
         return user_history, _return
+
+
+class UserItemEpisodeLoader(DataLoader):
+    def __init__(self, *args, **kargs):
+        super().__init__(*args, **kargs, collate_fn=self.collate_function)
+
+    @staticmethod
+    def collate_function(batch):
+        return np.array([(seq, r) for seq, r in batch], dtype=object).reshape(-1, 2)
