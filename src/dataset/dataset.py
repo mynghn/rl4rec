@@ -133,6 +133,7 @@ class AmazonReviewDataset(Dataset):
         return (
             self.ratings.select("asin")
             .distinct()
+            .coalesce(1)
             .orderBy("asin")
             .withColumn("item_index", monotonically_increasing_id())
         )
