@@ -70,11 +70,10 @@ class TopKOfflineREINFORCE(nn.Module):
             behavior_policy_prob=behavior_policy_prob,
         )
 
-        batch_loss = (
-            _importance_weight * _lambda_K * episodic_return * log_action_policy_prob
+        return torch.mean(
+            _importance_weight * _lambda_K * episodic_return * log_action_policy_prob,
+            dim=0,
         )
-
-        return torch.mean(batch_loss, dim=0)
 
     def behavior_policy_loss(
         self, state: torch.Tensor, action: torch.Tensor
