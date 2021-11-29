@@ -70,7 +70,7 @@ class TopKOfflineREINFORCE(nn.Module):
             behavior_policy_prob=behavior_policy_prob,
         )
 
-        return torch.mean(
+        return -torch.mean(
             _importance_weight * _lambda_K * episodic_return * log_action_policy_prob,
             dim=0,
         )
