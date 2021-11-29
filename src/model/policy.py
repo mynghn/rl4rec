@@ -15,7 +15,7 @@ class SoftmaxStochasticPolicy(nn.Module):
     ):
         super(SoftmaxStochasticPolicy, self).__init__()
 
-        self.action_space = torch.range(num_actions)
+        self.action_space = torch.arange(num_actions)
         self.action_embeddings = nn.Embedding(
             num_embeddings=num_actions,
             embedding_dim=action_embedding_size,
