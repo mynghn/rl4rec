@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.nn.modules.loss import KLDivLoss
 
 from .nn import StateTransitionNetwork
 from .policy import SoftmaxStochasticPolicy
@@ -26,6 +27,8 @@ class TopKOfflineREINFORCE(nn.Module):
 
         self.weight_cap = weight_cap
 
+        self.kl_div_loss = KLDivLoss(reduction="batchmean")
+
     def _compute_lambda_K(self, policy_prob: torch.Tensor) -> torch.Tensor:
         return self.K * ((1 - policy_prob) ** (self.K - 1))
 
@@ -37,7 +40,7 @@ class TopKOfflineREINFORCE(nn.Module):
             weight, torch.mul(torch.ones_like(weight), self.weight_cap)
         )
 
-    def loss(
+    def action_policy_loss(
         self,
         state: torch.Tensor,
         action: torch.Tensor,
@@ -66,3 +69,19 @@ class TopKOfflineREINFORCE(nn.Module):
         )
 
         return torch.mean(batch_loss, dim=0)
+
+    def behavior_policy_loss(
+        self, state: torch.Tensor, action: torch.Tensor
+    ) -> torch.Tensor:
+        if isinstance(self.behavior_policy.softmax, nn.AdaptiveLogSoftmaxWithLoss):
+            log_behavior_policy_prob = self.behavior_policy(state)[:, action]
+        else:
+            log_behavior_policy_prob = torch.log(self.behavior_policy(state)[:, action])
+
+        batch_size = action.size(0)
+        actual_action_prob = torch.zeros_like(log_behavior_policy_prob).index_put(
+            indices=(torch.arange(batch_size), action.squeeze().long()),
+            values=torch.ones(batch_size),
+        )
+
+        return self.kl_div_loss(log_behavior_policy_prob, actual_action_prob)
