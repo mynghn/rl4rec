@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn.modules.loss import KLDivLoss
+from torch.optim.optimizer import Optimizer
 
 from .nn import StateTransitionNetwork
 from .policy import SoftmaxStochasticPolicy
@@ -12,6 +13,8 @@ class TopKOfflineREINFORCE(nn.Module):
         state_network: StateTransitionNetwork,
         action_policy: SoftmaxStochasticPolicy,
         behavior_policy: SoftmaxStochasticPolicy,
+        action_policy_optimizer: Optimizer,
+        behavior_policy_optimizer: Optimizer,
         K: int,
         weight_cap: float,
     ):
@@ -28,6 +31,9 @@ class TopKOfflineREINFORCE(nn.Module):
         self.weight_cap = weight_cap
 
         self.kl_div_loss = KLDivLoss(reduction="batchmean")
+
+        self.action_policy_optimizer = action_policy_optimizer
+        self.behavior_policy_optimizer = behavior_policy_optimizer
 
     def _compute_lambda_K(self, policy_prob: torch.Tensor) -> torch.Tensor:
         return self.K * ((1 - policy_prob) ** (self.K - 1))
@@ -85,3 +91,13 @@ class TopKOfflineREINFORCE(nn.Module):
         )
 
         return self.kl_div_loss(log_behavior_policy_prob, actual_action_prob)
+
+    def update_action_policy(self, action_policy_loss: torch.Tensor):
+        self.action_policy_optimizer.zero_grad()
+        action_policy_loss.backward()
+        self.action_policy_optimizer.step()
+
+    def update_behavior_policy(self, behavior_policy_loss: torch.Tensor):
+        self.behavior_policy_optimizer.zero_grad()
+        behavior_policy_loss.backward()
+        self.behavior_policy_optimizer.step()
