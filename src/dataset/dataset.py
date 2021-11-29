@@ -1,8 +1,9 @@
 import datetime
 import os
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
+import torch
 from pyspark.sql import SparkSession
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.functions import (
@@ -13,6 +14,7 @@ from pyspark.sql.functions import (
     monotonically_increasing_id,
     regexp_extract,
     regexp_replace,
+    size,
     udf,
 )
 from pyspark.sql.types import (
@@ -152,9 +154,11 @@ class AmazonReviewDataset(Dataset):
                 collect_list("item_index").over(
                     W.partitionBy("reviewerID")
                     .orderBy("unixReviewTime")
-                    .rowsBetween(W.unboundedPreceding, W.currentRow)
+                    .rowsBetween(W.unboundedPreceding, -1)
                 ),
             )
+            .filter(size("user_history") > 0)
+            .withColumnRenamed("item_index", "action")
             .withColumn("reward", col("overall") - 3.0)
             .withColumn(
                 "reward_episode",
@@ -168,21 +172,24 @@ class AmazonReviewDataset(Dataset):
             .withColumn(
                 "return", self._compute_return("reward_episode", "discount_factor")
             )
-            .select("user_history", "return")
+            .select("user_history", "action", "return")
         )
 
         episodic_samples = np.array(
-            [(row["user_history"], row["return"]) for row in episodes_df.collect()]
+            [
+                (row["user_history"], row["action"], row["return"])
+                for row in episodes_df.collect()
+            ]
         )
 
         return episodic_samples
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.data)
 
-    def __getitem__(self, idx):
-        user_history, _return = self.data[idx]
-        return user_history, _return
+    def __getitem__(self, idx) -> Tuple[List[int], int, float]:
+        user_history, action, _return = self.data[idx]
+        return user_history, action, _return
 
 
 class UserItemEpisodeLoader(DataLoader):
@@ -190,5 +197,13 @@ class UserItemEpisodeLoader(DataLoader):
         super().__init__(*args, **kargs, collate_fn=self.collate_function)
 
     @staticmethod
-    def collate_function(batch):
-        return np.array(batch, dtype=object).reshape(-1, 2)
+    def collate_function(
+        batch,
+    ) -> Tuple[List[torch.IntTensor], torch.IntTensor, torch.FloatTensor]:
+
+        user_history, action, _return = tuple(np.array(batch, dtype=object).T)
+        return (
+            [torch.IntTensor(seq) for seq in user_history],
+            torch.from_numpy(action.astype(np.int32)),
+            torch.from_numpy(_return.astype(np.float32)),
+        )
