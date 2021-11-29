@@ -190,4 +190,4 @@ class UserItemEpisodeLoader(DataLoader):
 
     @staticmethod
     def collate_function(batch):
-        return np.array([(seq, r) for seq, r in batch], dtype=object).reshape(-1, 2)
+        return np.array(batch, dtype=object).reshape(-1, 2)
