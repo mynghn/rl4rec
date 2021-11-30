@@ -26,15 +26,15 @@ def train_agent(
             dataloader, desc="train"
         ):
             if device.type != "cpu":
-                prev_item_sequence = prev_item_sequence.to(device)
+                prev_item_sequence.data = prev_item_sequence.data.to(device)
+                prev_item_sequence.lengths = prev_item_sequence.lengths.to(device)
+
                 episodic_return = episodic_return.to(device)
 
-            user_state = torch.Tensor(
-                [agent.state_network(seq) for seq in prev_item_sequence]
-            )
+            user_state = agent.state_network(prev_item_sequence)
 
             action_policy_loss = agent.action_policy_loss(
-                state=user_state, action=action
+                state=user_state, action=action, episodic_return=episodic_return
             )
             agent.update_action_policy(action_policy_loss=action_policy_loss)
 
@@ -48,9 +48,9 @@ def train_agent(
                 behavior_policy_loss_log.append(behavior_policy_loss)
 
         if debug:
-            print(f"1. Epoch {epoch} final action policy loss: {action_policy_loss}")
+            print(f"1. Epoch {epoch}'s final action policy loss: {action_policy_loss}")
             print(
-                f"2. Epoch {epoch} final behavior policy loss: {behavior_policy_loss}"
+                f"2. Epoch {epoch}'s final behavior policy loss: {behavior_policy_loss}"
             )
 
         print("=" * 80)
