@@ -1,6 +1,7 @@
 import datetime
 import os
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -137,7 +138,7 @@ class AmazonReviewDataset(Dataset):
             .distinct()
             .coalesce(1)
             .orderBy("asin")
-            .withColumn("item_index", monotonically_increasing_id())
+            .withColumn("item_index", monotonically_increasing_id() + 1)
         )
 
     @staticmethod
@@ -192,6 +193,12 @@ class AmazonReviewDataset(Dataset):
         return user_history, action, _return
 
 
+@dataclass
+class PaddedNSortedUserHistoryBatch:
+    data: torch.IntTensor
+    lengths: torch.IntTensor
+
+
 class UserItemEpisodeLoader(DataLoader):
     def __init__(self, *args, **kargs):
         super().__init__(*args, **kargs, collate_fn=self.collate_function)
@@ -199,11 +206,37 @@ class UserItemEpisodeLoader(DataLoader):
     @staticmethod
     def collate_function(
         batch,
-    ) -> Tuple[List[torch.IntTensor], torch.IntTensor, torch.FloatTensor]:
+    ) -> Tuple[PaddedNSortedUserHistoryBatch, torch.IntTensor, torch.FloatTensor]:
 
         user_history, action, _return = tuple(np.array(batch, dtype=object).T)
+
+        padded_user_history, lengths = UserItemEpisodeLoader.pad_sequence(user_history)
+        sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
+
         return (
-            [torch.IntTensor(seq) for seq in user_history],
+            PaddedNSortedUserHistoryBatch(
+                data=padded_user_history[sorted_idx],
+                lengths=sorted_lengths,
+            ),
             torch.from_numpy(action.astype(np.int32)),
             torch.from_numpy(_return.astype(np.float32)),
         )
+
+    @staticmethod
+    def pad_sequence(
+        user_history: Sequence[Sequence[int]], pad_val: int = 0
+    ) -> Tuple[torch.IntTensor, torch.IntTensor]:
+        lengths = torch.IntTensor([len(seq) for seq in user_history])
+        max_length = lengths.max()
+        padded = torch.stack(
+            [
+                torch.cat(
+                    [
+                        torch.IntTensor(item_seq),
+                        torch.zeros(max_length - len(item_seq)) + pad_val,
+                    ]
+                ).int()
+                for item_seq in user_history
+            ]
+        )
+        return padded, lengths
