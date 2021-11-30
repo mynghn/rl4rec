@@ -35,12 +35,14 @@ class TopKOfflineREINFORCE(nn.Module):
         self.action_policy_optimizer = action_policy_optimizer
         self.behavior_policy_optimizer = behavior_policy_optimizer
 
-    def _compute_lambda_K(self, policy_prob: torch.Tensor) -> torch.Tensor:
+    def _compute_lambda_K(self, policy_prob: torch.FloatTensor) -> torch.FloatTensor:
         return self.K * ((1 - policy_prob) ** (self.K - 1))
 
     def _compute_importance_weight(
-        self, action_policy_prob: torch.Tensor, behavior_policy_prob: torch.Tensor
-    ) -> torch.Tensor:
+        self,
+        action_policy_prob: torch.FloatTensor,
+        behavior_policy_prob: torch.FloatTensor,
+    ) -> torch.FloatTensor:
         weight = torch.div(action_policy_prob, behavior_policy_prob)
         return torch.minimum(
             weight, torch.mul(torch.ones_like(weight), self.weight_cap)
@@ -48,10 +50,10 @@ class TopKOfflineREINFORCE(nn.Module):
 
     def action_policy_loss(
         self,
-        state: torch.Tensor,
-        action: torch.Tensor,
-        episodic_return: torch.Tensor,
-    ) -> torch.Tensor:
+        state: torch.FloatTensor,
+        action: torch.LongTensor,
+        episodic_return: torch.FloatTensor,
+    ) -> torch.FloatTensor:
         if isinstance(self.action_policy.softmax, nn.AdaptiveLogSoftmaxWithLoss):
             log_action_policy_prob = self.action_policy(state)[:, action]
             action_policy_prob = torch.exp(log_action_policy_prob)

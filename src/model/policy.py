@@ -32,7 +32,7 @@ class SoftmaxStochasticPolicy(nn.Module):
             self.softmax = nn.Softmax(dim=1)
         self.T = softmax_temperature
 
-    def forward(self, state: torch.Tensor) -> torch.Tensor:
+    def forward(self, state: torch.FloatTensor) -> torch.FloatTensor:
         assert state.size(-1) == self.action_embeddings.weight.size(
             -1
         ), "User state & action embedding should have same size of dimensions."
