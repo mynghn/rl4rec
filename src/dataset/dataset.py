@@ -209,7 +209,7 @@ class UserItemEpisodeLoader(DataLoader):
     def collate_function(
         batch,
     ) -> Tuple[PaddedNSortedUserHistoryBatch, torch.LongTensor, torch.FloatTensor]:
-
+        batch_size = len(batch)
         user_history, action, _return = tuple(np.array(batch, dtype=object).T)
 
         padded_user_history, lengths = UserItemEpisodeLoader.pad_sequence(user_history)
@@ -220,8 +220,8 @@ class UserItemEpisodeLoader(DataLoader):
                 data=padded_user_history[sorted_idx],
                 lengths=sorted_lengths,
             ),
-            torch.from_numpy(action.astype(np.int64)),
-            torch.from_numpy(_return.astype(np.float32)),
+            torch.from_numpy(action.astype(np.int64)).view(batch_size, -1),
+            torch.from_numpy(_return.astype(np.float32)).view(batch_size, -1),
         )
 
     @staticmethod
