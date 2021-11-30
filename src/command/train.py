@@ -36,12 +36,14 @@ def train_agent(
             action_policy_loss = agent.action_policy_loss(
                 state=user_state, action=action, episodic_return=episodic_return
             )
-            agent.update_action_policy(action_policy_loss=action_policy_loss)
-
             behavior_policy_loss = agent.behavior_policy_loss(
                 state=user_state, action=action
             )
-            agent.update_behavior_policy(behavior_policy_loss=behavior_policy_loss)
+
+            agent.update(
+                action_policy_loss=action_policy_loss,
+                behavior_policy_loss=behavior_policy_loss,
+            )
 
             if debug:
                 action_policy_loss_log.append(action_policy_loss)
