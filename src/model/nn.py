@@ -2,10 +2,12 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
-from ..dataset.dataset import PaddedNSortedUserHistoryBatch
+from ..dataset.dataset import PaddedNSortedUserHistoryBatch, UserItemEpisodeLoader
 
 
 class StateTransitionNetwork(nn.Module):
+    padding_signal = UserItemEpisodeLoader.padding_signal
+
     def __init__(
         self,
         num_items: int,
@@ -31,7 +33,7 @@ class StateTransitionNetwork(nn.Module):
 
     def forward(self, user_history: PaddedNSortedUserHistoryBatch) -> torch.FloatTensor:
         padding_idx_replaced = user_history.data.masked_fill(
-            user_history.data == -1, self.item_embeddings.padding_idx
+            user_history.data == self.padding_signal, self.item_embeddings.padding_idx
         )
         user_history_embedded = self.item_embeddings(padding_idx_replaced)
         user_history_packedNembedded = pack_padded_sequence(

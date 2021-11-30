@@ -200,6 +200,8 @@ class PaddedNSortedUserHistoryBatch:
 
 
 class UserItemEpisodeLoader(DataLoader):
+    padding_signal = -1
+
     def __init__(self, *args, **kargs):
         super().__init__(*args, **kargs, collate_fn=self.collate_function)
 
@@ -233,9 +235,10 @@ class UserItemEpisodeLoader(DataLoader):
                 torch.cat(
                     [
                         torch.LongTensor(item_seq),
-                        -torch.ones(max_length - len(item_seq)),
+                        torch.zeros(max_length - len(item_seq))
+                        + UserItemEpisodeLoader.padding_signal,
                     ]
-                ).int()
+                ).long()
                 for item_seq in user_history
             ]
         )
