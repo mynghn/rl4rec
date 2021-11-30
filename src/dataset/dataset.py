@@ -224,7 +224,7 @@ class UserItemEpisodeLoader(DataLoader):
 
     @staticmethod
     def pad_sequence(
-        user_history: Sequence[Sequence[int]], pad_val: int = 0
+        user_history: Sequence[Sequence[int]],
     ) -> Tuple[torch.IntTensor, torch.IntTensor]:
         lengths = torch.IntTensor([len(seq) for seq in user_history])
         max_length = lengths.max()
@@ -233,7 +233,7 @@ class UserItemEpisodeLoader(DataLoader):
                 torch.cat(
                     [
                         torch.IntTensor(item_seq),
-                        torch.zeros(max_length - len(item_seq)) + pad_val,
+                        torch.zeros(max_length - len(item_seq)),
                     ]
                 ).int()
                 for item_seq in user_history
