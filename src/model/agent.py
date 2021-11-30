@@ -54,17 +54,43 @@ class TopKOfflineREINFORCE(nn.Module):
         action: torch.LongTensor,
         episodic_return: torch.FloatTensor,
     ) -> torch.FloatTensor:
+        batch_size = episodic_return.size(0)
         if isinstance(self.action_policy.softmax, nn.AdaptiveLogSoftmaxWithLoss):
-            log_action_policy_prob = self.action_policy(state)[:, action]
+            log_action_policy_probs = self.action_policy(state)
+            log_action_policy_prob = torch.cat(
+                [
+                    log_action_policy_probs[batch_idx][action[batch_idx]]
+                    for batch_idx in range(batch_size)
+                ]
+            ).view(batch_size, -1)
             action_policy_prob = torch.exp(log_action_policy_prob)
         else:
-            action_policy_prob = self.action_policy(state)[:, action]
+            action_policy_probs = self.action_policy(state)
+            action_policy_prob = torch.cat(
+                [
+                    action_policy_probs[batch_idx][action[batch_idx]]
+                    for batch_idx in range(batch_size)
+                ]
+            ).view(batch_size, -1)
             log_action_policy_prob = torch.log(action_policy_prob)
 
         if isinstance(self.behavior_policy.softmax, nn.AdaptiveLogSoftmaxWithLoss):
-            behavior_policy_prob = torch.exp(self.action_policy(state)[:, action])
+            log_behavior_policy_probs = self.behavior_policy(state)
+            log_behavior_policy_prob = torch.cat(
+                [
+                    log_behavior_policy_probs[batch_idx][action[batch_idx]]
+                    for batch_idx in range(batch_size)
+                ]
+            ).view(batch_size, -1)
+            behavior_policy_prob = torch.exp(log_behavior_policy_prob)
         else:
-            behavior_policy_prob = self.action_policy(state)[:, action]
+            behavior_policy_probs = self.behavior_policy(state)
+            behavior_policy_prob = torch.cat(
+                [
+                    behavior_policy_probs[batch_idx][action[batch_idx]]
+                    for batch_idx in range(batch_size)
+                ]
+            ).view(batch_size, -1)
 
         _lambda_K = self._compute_lambda_K(policy_prob=action_policy_prob)
         _importance_weight = self._compute_importance_weight(
@@ -78,27 +104,32 @@ class TopKOfflineREINFORCE(nn.Module):
         )
 
     def behavior_policy_loss(
-        self, state: torch.Tensor, action: torch.Tensor
-    ) -> torch.Tensor:
+        self, state: torch.FloatTensor, action: torch.LongTensor
+    ) -> torch.FloatTensor:
+        batch_size = action.size(0)
         if isinstance(self.behavior_policy.softmax, nn.AdaptiveLogSoftmaxWithLoss):
-            log_behavior_policy_prob = self.behavior_policy(state)[:, action]
+            log_behavior_policy_probs = self.behavior_policy(state)
         else:
-            log_behavior_policy_prob = torch.log(self.behavior_policy(state)[:, action])
+            behavior_policy_probs = self.behavior_policy(state)
+            log_behavior_policy_probs = torch.log(behavior_policy_probs)
 
         batch_size = action.size(0)
-        actual_action_prob = torch.zeros_like(log_behavior_policy_prob).index_put(
-            indices=(torch.arange(batch_size), action.squeeze().long()),
-            values=torch.ones(batch_size),
-        )
+        actual_action_probs = torch.zeros_like(log_behavior_policy_probs)
+        for batch_idx in range(batch_size):
+            actual_action_probs[batch_idx][action[batch_idx]] = 1.0
 
-        return self.kl_div_loss(log_behavior_policy_prob, actual_action_prob)
+        return self.kl_div_loss(log_behavior_policy_probs, actual_action_probs)
 
-    def update_action_policy(self, action_policy_loss: torch.Tensor):
+    def update(
+        self,
+        action_policy_loss: torch.FloatTensor,
+        behavior_policy_loss: torch.FloatTensor,
+    ):
         self.action_policy_optimizer.zero_grad()
-        action_policy_loss.backward()
-        self.action_policy_optimizer.step()
-
-    def update_behavior_policy(self, behavior_policy_loss: torch.Tensor):
         self.behavior_policy_optimizer.zero_grad()
+
+        action_policy_loss.backward(retain_graph=True)
         behavior_policy_loss.backward()
+
+        self.action_policy_optimizer.step()
         self.behavior_policy_optimizer.step()
