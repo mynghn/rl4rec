@@ -138,7 +138,7 @@ class AmazonReviewDataset(Dataset):
             .distinct()
             .coalesce(1)
             .orderBy("asin")
-            .withColumn("item_index", monotonically_increasing_id() + 1)
+            .withColumn("item_index", monotonically_increasing_id())
         )
 
     @staticmethod

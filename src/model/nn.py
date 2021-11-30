@@ -18,7 +18,7 @@ class StateTransitionNetwork(nn.Module):
         self.item_embeddings = nn.Embedding(
             num_embeddings=num_items + 1,
             embedding_dim=item_embedding_size,
-            padding_idx=0,
+            padding_idx=-1,
         )
         self.rnn = nn.GRU(
             input_size=item_embedding_size,
