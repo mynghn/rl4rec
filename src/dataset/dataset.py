@@ -195,8 +195,8 @@ class AmazonReviewDataset(Dataset):
 
 @dataclass
 class PaddedNSortedUserHistoryBatch:
-    data: torch.IntTensor
-    lengths: torch.IntTensor
+    data: torch.LongTensor
+    lengths: torch.LongTensor
 
 
 class UserItemEpisodeLoader(DataLoader):
@@ -206,7 +206,7 @@ class UserItemEpisodeLoader(DataLoader):
     @staticmethod
     def collate_function(
         batch,
-    ) -> Tuple[PaddedNSortedUserHistoryBatch, torch.IntTensor, torch.FloatTensor]:
+    ) -> Tuple[PaddedNSortedUserHistoryBatch, torch.LongTensor, torch.FloatTensor]:
 
         user_history, action, _return = tuple(np.array(batch, dtype=object).T)
 
@@ -218,21 +218,21 @@ class UserItemEpisodeLoader(DataLoader):
                 data=padded_user_history[sorted_idx],
                 lengths=sorted_lengths,
             ),
-            torch.from_numpy(action.astype(np.int32)),
+            torch.from_numpy(action.astype(np.int64)),
             torch.from_numpy(_return.astype(np.float32)),
         )
 
     @staticmethod
     def pad_sequence(
         user_history: Sequence[Sequence[int]],
-    ) -> Tuple[torch.IntTensor, torch.IntTensor]:
-        lengths = torch.IntTensor([len(seq) for seq in user_history])
+    ) -> Tuple[torch.LongTensor, torch.LongTensor]:
+        lengths = torch.LongTensor([len(seq) for seq in user_history])
         max_length = lengths.max()
         padded = torch.stack(
             [
                 torch.cat(
                     [
-                        torch.IntTensor(item_seq),
+                        torch.LongTensor(item_seq),
                         torch.zeros(max_length - len(item_seq)),
                     ]
                 ).int()
