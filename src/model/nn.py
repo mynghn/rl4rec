@@ -30,7 +30,10 @@ class StateTransitionNetwork(nn.Module):
         )
 
     def forward(self, user_history: PaddedNSortedUserHistoryBatch) -> torch.FloatTensor:
-        user_history_embedded = self.item_embeddings(user_history.data)
+        padding_idx_replaced = user_history.data.masked_fill(
+            user_history.data == -1, self.item_embeddings.padding_idx
+        )
+        user_history_embedded = self.item_embeddings(padding_idx_replaced)
         user_history_packedNembedded = pack_padded_sequence(
             input=user_history_embedded,
             lengths=user_history.lengths,

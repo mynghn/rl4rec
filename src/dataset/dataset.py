@@ -233,7 +233,7 @@ class UserItemEpisodeLoader(DataLoader):
                 torch.cat(
                     [
                         torch.LongTensor(item_seq),
-                        torch.zeros(max_length - len(item_seq)),
+                        -torch.ones(max_length - len(item_seq)),
                     ]
                 ).int()
                 for item_seq in user_history
