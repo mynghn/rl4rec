@@ -19,7 +19,7 @@ from pyspark.sql.types import (
 from pyspark.sql.window import Window as W
 from torch.utils.data import DataLoader, Dataset
 
-from train import PaddedNSortedUserHistoryBatch, UserItemEpisodeTrainLoader
+from .train import PaddedNSortedUserHistoryBatch, UserItemEpisodeTrainLoader
 
 
 class AmazonReviewEvalDataset(Dataset):
