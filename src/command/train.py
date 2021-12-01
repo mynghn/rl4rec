@@ -33,7 +33,9 @@ def train_agent(
                 agent.to(device)
                 agent.state_network.to(device)
                 agent.action_policy.to(device)
+                agent.action_policy.action_space.to(device)
                 agent.behavior_policy.to(device)
+                agent.behavior_policy.action_space.to(device)
 
             user_state = agent.state_network(prev_item_sequence)
 
