@@ -4,13 +4,13 @@ from typing import List, Optional, Tuple
 import torch
 from tqdm import tqdm
 
-from ..dataset.dataset import UserItemEpisodeLoader
+from ..dataset.train import UserItemEpisodeTrainLoader
 from ..model.agent import TopKOfflineREINFORCE
 
 
 def train_agent(
     agent: TopKOfflineREINFORCE,
-    train_loader: UserItemEpisodeLoader,
+    train_loader: UserItemEpisodeTrainLoader,
     n_epochs: int,
     device: torch.device = torch.device("cpu"),
     debug: bool = True,
