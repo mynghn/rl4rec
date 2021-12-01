@@ -2,11 +2,11 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
-from ..dataset.dataset import PaddedNSortedUserHistoryBatch, UserItemEpisodeLoader
+from ..dataset.train import PaddedNSortedUserHistoryBatch, UserItemEpisodeTrainLoader
 
 
 class StateTransitionNetwork(nn.Module):
-    padding_signal = UserItemEpisodeLoader.padding_signal
+    padding_signal = UserItemEpisodeTrainLoader.padding_signal
 
     def __init__(
         self,
