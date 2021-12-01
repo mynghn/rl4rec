@@ -32,7 +32,7 @@ from pyspark.sql.window import Window as W
 from torch.utils.data import DataLoader, Dataset
 
 
-class AmazonReviewDataset(Dataset):
+class AmazonReviewTrainDataset(Dataset):
     ratings_fetching_schema = StructType(
         [
             StructField("reviewerID", StringType()),
@@ -211,7 +211,7 @@ class PaddedNSortedUserHistoryBatch:
     lengths: torch.LongTensor
 
 
-class UserItemEpisodeLoader(DataLoader):
+class UserItemEpisodeTrainLoader(DataLoader):
     padding_signal = -1
 
     def __init__(self, *args, **kargs):
@@ -224,7 +224,9 @@ class UserItemEpisodeLoader(DataLoader):
         batch_size = len(batch)
         user_history, action, _return = tuple(np.array(batch, dtype=object).T)
 
-        padded_user_history, lengths = UserItemEpisodeLoader.pad_sequence(user_history)
+        padded_user_history, lengths = UserItemEpisodeTrainLoader.pad_sequence(
+            user_history
+        )
         sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
 
         return (
@@ -248,7 +250,7 @@ class UserItemEpisodeLoader(DataLoader):
                     [
                         torch.LongTensor(item_seq),
                         torch.zeros(max_length - len(item_seq))
-                        + UserItemEpisodeLoader.padding_signal,
+                        + UserItemEpisodeTrainLoader.padding_signal,
                     ]
                 ).long()
                 for item_seq in user_history
