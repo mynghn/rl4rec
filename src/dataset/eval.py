@@ -87,9 +87,9 @@ class AmazonReviewEvalDataset(Dataset):
 
         min_length, max_length = self.threshold
         if min_length:
-            with_history = with_history.filter(size("user_history") >= min_length)
+            with_history = with_history.filter(size("user_history") >= min_length - 1)
         if max_length:
-            with_history = with_history.filter(size("user_history") <= max_length)
+            with_history = with_history.filter(size("user_history") <= max_length - 1)
 
         episodes_df = (
             with_history.withColumn(
