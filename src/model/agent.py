@@ -1,4 +1,4 @@
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -141,7 +141,7 @@ class TopKOfflineREINFORCE(nn.Module):
 
     def recommend(
         self, state: torch.FloatTensor
-    ) -> Tuple[torch.IntTensor, torch.FloatTensor]:
+    ) -> Tuple[List[torch.LongTensor], List[torch.FloatTensor]]:
         if isinstance(self.action_policy.softmax, nn.AdaptiveLogSoftmaxWithLoss):
             log_action_policy_probs = self.action_policy(state)
             action_policy_probs = torch.exp(log_action_policy_probs)
@@ -152,4 +152,4 @@ class TopKOfflineREINFORCE(nn.Module):
         items = sorted_indices[:, : self.K]
         logits = torch.gather(input=action_policy_probs, dim=1, index=items)
 
-        return items, logits
+        return list(items), list(logits)
