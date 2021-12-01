@@ -1,5 +1,8 @@
+from typing import Dict, Tuple
+
 import torch
 import torch.nn as nn
+from pyspark.sql import DataFrame
 from torch.nn.modules.loss import KLDivLoss
 from torch.optim.optimizer import Optimizer
 
@@ -17,6 +20,7 @@ class TopKOfflineREINFORCE(nn.Module):
         behavior_policy_optimizer: Optimizer,
         K: int,
         weight_cap: float,
+        item_index_map: Dict[int, str],
     ):
         super(TopKOfflineREINFORCE, self).__init__()
 
@@ -34,6 +38,8 @@ class TopKOfflineREINFORCE(nn.Module):
 
         self.action_policy_optimizer = action_policy_optimizer
         self.behavior_policy_optimizer = behavior_policy_optimizer
+
+        self.item_index_map = item_index_map
 
     def _compute_lambda_K(self, policy_prob: torch.FloatTensor) -> torch.FloatTensor:
         return self.K * ((1 - policy_prob) ** (self.K - 1))
@@ -133,3 +139,18 @@ class TopKOfflineREINFORCE(nn.Module):
 
         self.action_policy_optimizer.step()
         self.behavior_policy_optimizer.step()
+
+    def recommend(
+        self, state: torch.FloatTensor
+    ) -> Tuple[torch.IntTensor, torch.FloatTensor]:
+        if isinstance(self.action_policy.softmax, nn.AdaptiveLogSoftmaxWithLoss):
+            log_action_policy_probs = self.action_policy(state)
+            action_policy_probs = torch.exp(log_action_policy_probs)
+        else:
+            action_policy_probs = self.action_policy(state)
+
+        sorted_indices = action_policy_probs.argsort(dim=1, descending=True)
+        items = sorted_indices[:, : self.K]
+        logits = torch.gather(input=action_policy_probs, dim=1, index=items)
+
+        return items, logits
