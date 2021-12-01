@@ -27,7 +27,6 @@ def train_agent(
         ):
             if device.type != "cpu":
                 prev_item_sequence.data = prev_item_sequence.data.to(device)
-                prev_item_sequence.lengths = prev_item_sequence.lengths.to(device)
                 action = action.to(device)
                 episodic_return = episodic_return.to(device)
 
