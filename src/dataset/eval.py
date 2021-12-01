@@ -3,7 +3,6 @@ import os
 from typing import List, Tuple
 
 import numpy as np
-import torch
 from pyspark.sql import SparkSession
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.functions import col, collect_list, from_unixtime, size
@@ -141,9 +140,8 @@ class UserItemEpisodeEvalLoader(DataLoader):
     def collate_function(
         batch: List[Tuple[str, List[int], int, float]],
     ) -> Tuple[
-        List[str], PaddedNSortedUserHistoryBatch, torch.LongTensor, torch.FloatTensor
+        List[str], PaddedNSortedUserHistoryBatch, List[List[int]], List[List[float]]
     ]:
-        batch_size = len(batch)
         user_id, user_history, episode, relevance = tuple(
             np.array(batch, dtype=object).T
         )
@@ -159,6 +157,6 @@ class UserItemEpisodeEvalLoader(DataLoader):
                 data=padded_user_history[sorted_idx],
                 lengths=sorted_lengths,
             ),
-            torch.from_numpy(episode.astype(np.int64)).view(batch_size, -1),
-            torch.from_numpy(relevance.astype(np.float32)).view(batch_size, -1),
+            list(episode),
+            list(relevance),
         )
