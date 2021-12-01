@@ -10,7 +10,7 @@ from ..model.agent import TopKOfflineREINFORCE
 
 def train_agent(
     agent: TopKOfflineREINFORCE,
-    dataloader: UserItemEpisodeLoader,
+    train_loader: UserItemEpisodeLoader,
     n_epochs: int,
     device: torch.device = torch.device("cpu"),
     debug: bool = True,
@@ -23,7 +23,7 @@ def train_agent(
 
         agent.train()
         for prev_item_sequence, action, episodic_return in tqdm(
-            dataloader, desc="train"
+            train_loader, desc="train"
         ):
             if device.type != "cpu":
                 prev_item_sequence.data = prev_item_sequence.data.to(device)
