@@ -53,8 +53,8 @@ def train_agent(
             )
 
             if debug:
-                action_policy_loss_log.append(action_policy_loss.cpu())
-                behavior_policy_loss_log.append(behavior_policy_loss.cpu())
+                action_policy_loss_log.append(action_policy_loss.cpu().item())
+                behavior_policy_loss_log.append(behavior_policy_loss.cpu().item())
 
             if device.type == "cuda":
                 torch.cuda.empty_cache()
