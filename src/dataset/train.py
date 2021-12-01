@@ -86,7 +86,7 @@ class AmazonReviewTrainDataset(Dataset):
         self.item_index_map: DataFrame = self._build_item_index_map()
         self.data: np.ndarray = self._build_episodic_data()
 
-    def _get_ratings_df(self, json_path):
+    def _get_ratings_df(self, json_path: str) -> DataFrame:
         raw = self.spark.read.schema(self.ratings_fetching_schema).json(json_path)
 
         preprocessed = raw.withColumn("timestamp", from_unixtime("unixReviewTime"))
@@ -101,7 +101,7 @@ class AmazonReviewTrainDataset(Dataset):
 
         return preprocessed
 
-    def _get_metadata_df(self, json_path):
+    def _get_metadata_df(self, json_path: str) -> DataFrame:
         raw = self.spark.read.schema(self.metadata_fetching_schema).json(json_path)
 
         preprocessed = raw.withColumn(
@@ -200,7 +200,7 @@ class AmazonReviewTrainDataset(Dataset):
     def __len__(self) -> int:
         return len(self.data)
 
-    def __getitem__(self, idx) -> Tuple[List[int], int, float]:
+    def __getitem__(self, idx: int) -> Tuple[List[int], int, float]:
         user_history, action, _return = self.data[idx]
         return user_history, action, _return
 
@@ -219,7 +219,7 @@ class UserItemEpisodeTrainLoader(DataLoader):
 
     @staticmethod
     def collate_function(
-        batch,
+        batch: List[Tuple[List[int], int, float]],
     ) -> Tuple[PaddedNSortedUserHistoryBatch, torch.LongTensor, torch.FloatTensor]:
         batch_size = len(batch)
         user_history, action, _return = tuple(np.array(batch, dtype=object).T)
