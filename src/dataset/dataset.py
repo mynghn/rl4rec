@@ -66,12 +66,15 @@ class AmazonReviewDataset(Dataset):
         discount_factor: float,
         start_date: datetime.date = None,
         end_date: datetime.date = None,
+        min_sequence_length: int = None,
+        max_sequence_length: int = None,
     ):
         self.spark = spark
         self.category_name = category_name
         self.start_date = start_date
         self.end_date = end_date
         self.discount_factor = discount_factor
+        self.threshold = (min_sequence_length, max_sequence_length)
 
         self.ratings: DataFrame = self._get_ratings_df(
             os.path.join(data_path, f"{self.category_name.replace(' ', '_')}.json")
@@ -148,7 +151,7 @@ class AmazonReviewDataset(Dataset):
         return float(gammas @ np.array(rewards))
 
     def _build_episodic_data(self) -> np.ndarray:
-        episodes_df = (
+        with_history = (
             self.ratings.join(self.item_index_map, ["asin"])
             .withColumn(
                 "user_history",
@@ -159,7 +162,16 @@ class AmazonReviewDataset(Dataset):
                 ),
             )
             .filter(size("user_history") > 0)
-            .withColumnRenamed("item_index", "action")
+        )
+
+        min_length, max_length = self.threshold
+        if min_length:
+            with_history = with_history.filter(size("user_history") >= min_length)
+        if max_length:
+            with_history = with_history.filter(size("user_history") <= max_length)
+
+        episodes_df = (
+            with_history.withColumnRenamed("item_index", "action")
             .withColumn("reward", col("overall") - 3.0)
             .withColumn(
                 "reward_episode",
