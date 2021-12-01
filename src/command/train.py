@@ -31,6 +31,12 @@ def train_agent(
                 episodic_return = episodic_return.to(device)
 
                 agent = agent.to(device)
+                agent.action_policy.action_space = agent.action_policy.action_space.to(
+                    device
+                )
+                agent.behavior_policy.action_space = (
+                    agent.behavior_policy.action_space.to(device)
+                )
 
             user_state = agent.state_network(prev_item_sequence)
 
