@@ -102,7 +102,7 @@ class AmazonReviewEvalDataset(Dataset):
             )
             .withColumn(
                 "relevance",
-                collect_list("rating").over(
+                collect_list("overall").over(
                     W.partitionBy("reviewerID")
                     .orderBy("unixReviewTime")
                     .rowsBetween(W.currentRow, W.unboundedFollowing)
