@@ -2,7 +2,6 @@ from typing import Dict, Tuple
 
 import torch
 import torch.nn as nn
-from pyspark.sql import DataFrame
 from torch.nn.modules.loss import KLDivLoss
 from torch.optim.optimizer import Optimizer
 
