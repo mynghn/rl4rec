@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 import torch
 import torch.nn as nn
@@ -19,7 +19,6 @@ class TopKOfflineREINFORCE(nn.Module):
         behavior_policy_optimizer: Optimizer,
         K: int,
         weight_cap: float,
-        item_index_map: Dict[int, str],
     ):
         super(TopKOfflineREINFORCE, self).__init__()
 
@@ -37,8 +36,6 @@ class TopKOfflineREINFORCE(nn.Module):
 
         self.action_policy_optimizer = action_policy_optimizer
         self.behavior_policy_optimizer = behavior_policy_optimizer
-
-        self.item_index_map = item_index_map
 
     def _compute_lambda_K(self, policy_prob: torch.FloatTensor) -> torch.FloatTensor:
         return self.K * ((1 - policy_prob) ** (self.K - 1))
