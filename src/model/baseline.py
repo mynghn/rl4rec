@@ -46,7 +46,9 @@ class CollaborativeFiltering:
             .select("user_int_id", "item_int_id", "overall")
         )
 
-        self.rating_logs = train_set.select("user_int_id", "item_int_id").distinct()
+        self.rating_logs = train_set_preprocessed.select(
+            "user_int_id", "item_int_id"
+        ).distinct()
 
         self.model = self.als.fit(train_set_preprocessed)
 
