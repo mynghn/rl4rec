@@ -1,7 +1,6 @@
 from typing import Dict
 
 import torch
-from torch._C import FloatTensor, LongTensor
 from tqdm import tqdm
 
 from ..dataset.eval import UserItemEpisodeEvalLoader
@@ -28,7 +27,7 @@ def evaluate_agent(
         prev_item_sequence,
         item_sequence_list,
         relevance_sequence_list,
-    ) in tqdm(eval_loader, desc="train"):
+    ) in tqdm(eval_loader, desc="eval"):
         user_state = agent.state_network(prev_item_sequence)
 
         recommended_items, _ = agent.recommend(user_state)
@@ -69,9 +68,9 @@ def evaluate_agent(
 
 
 def compute_ndcg(
-    recommendations: LongTensor,
-    actual_sequence: LongTensor,
-    relevance_sequence: FloatTensor,
+    recommendations: torch.LongTensor,
+    actual_sequence: torch.LongTensor,
+    relevance_sequence: torch.FloatTensor,
 ) -> float:
     positive_relevance = relevance_sequence[relevance_sequence > 0]
     sorted_relevance, _ = positive_relevance.sort(descending=True)
@@ -91,4 +90,4 @@ def compute_ndcg(
     _coefs = torch.ones(K) / torch.arange(2, K + 2).log2()
     dcg = (_coefs @ recommended_relevance).item()
 
-    return dcg / idcg
+    return dcg / idcg if idcg > 0 else 0.0
