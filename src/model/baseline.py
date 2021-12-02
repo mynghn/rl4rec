@@ -3,10 +3,15 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 from pyspark.ml.recommendation import ALS
 from pyspark.sql import DataFrame
+from pyspark.sql import Window as W
 from pyspark.sql.functions import (
     avg,
+    col,
     collect_list,
+    explode,
+    lit,
     monotonically_increasing_id,
+    slice,
     struct,
     udf,
 )
@@ -30,6 +35,7 @@ class CollaborativeFiltering:
 
         self.model = None
         self.user_id_map = self.item_id_map = None
+        self.rating_logs = None
 
     def train(self, train_set: DataFrame):
         self.user_id_map, self.item_id_map = self._build_integer_id_maps(train_set)
@@ -39,6 +45,8 @@ class CollaborativeFiltering:
             .join(self.item_id_map, ["asin"])
             .select("user_int_id", "item_int_id", "overall")
         )
+
+        self.rating_logs = train_set.select("user_int_id", "item_int_id").distinct()
 
         self.model = self.als.fit(train_set_preprocessed)
 
@@ -53,7 +61,30 @@ class CollaborativeFiltering:
             .select("user_int_id", "actuals")
         )
 
-        recommendations_df = self.model.recommendForUserSubset(eval_set_preprocessed, K)
+        recommendations_df = (
+            self.model.recommendForUserSubset(eval_set_preprocessed, -1)
+            .withColumn("recommendation", explode("recommendations"))
+            .select(
+                "user_int_id", "recommendation.item_int_id", "recommendation.rating"
+            )
+            .join(
+                self.rating_logs.withColumn("flag", lit(True)),
+                ["user_int_id", "item_int_id"],
+                "left",
+            )
+            .filter(col("flag").isNull())
+            .withColumn(
+                "recommendations",
+                collect_list(struct("item_int_id", "rating")).over(
+                    W.partitionBy("user_int_id")
+                    .orderBy(col("rating").desc())
+                    .rowsBetween(W.unboundedPreceding, W.unboundedFollowing)
+                ),
+            )
+            .withColumn("recommendations", slice("recommendations", 1, K))
+            .select("user_int_id", "recommendations")
+            .distinct()
+        )
 
         eval_df = recommendations_df.join(
             eval_set_preprocessed, ["user_int_id"]
