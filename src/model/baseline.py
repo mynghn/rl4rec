@@ -64,7 +64,9 @@ class CollaborativeFiltering:
         )
 
         recommendations_df = (
-            self.model.recommendForUserSubset(eval_set_preprocessed, -1)
+            self.model.recommendForUserSubset(
+                eval_set_preprocessed, self.item_id_map.count()
+            )
             .withColumn("recommendation", explode("recommendations"))
             .select(
                 "user_int_id", "recommendation.item_int_id", "recommendation.rating"
