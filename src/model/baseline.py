@@ -77,6 +77,7 @@ class CollaborativeFiltering:
                 "left",
             )
             .filter(col("flag").isNull())
+            .filter(col("rating") > 3.0)
             .withColumn(
                 "recommendations",
                 collect_list(struct("item_int_id", "rating")).over(
@@ -125,9 +126,7 @@ class CollaborativeFiltering:
         positive_items = set(
             log["item_int_id"] for log in actuals if log["overall"] > 3.0
         )
-        recommended_items = set(
-            rec["item_int_id"] for rec in recommendations if rec["rating"] > 3.0
-        )
+        recommended_items = set(rec["item_int_id"] for rec in recommendations)
         intersections = positive_items & recommended_items
 
         positive_rels = [
