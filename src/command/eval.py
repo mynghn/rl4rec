@@ -35,13 +35,14 @@ def evaluate_agent(
         for user_id, actual_seq, relevance_seq, recommendations in zip(
             user_id_list, item_sequence_list, relevance_sequence_list, recommended_items
         ):
-            intersection = set(actual_seq.tolist()) & set(recommendations.tolist())
+            positive_seq = actual_seq[relevance_seq > 0]
+            intersection = set(positive_seq.tolist()) & set(recommendations.tolist())
             if len(intersection) > 0:
                 hit += 1
                 users_hit.add(user_id)
 
             precision = len(intersection) / len(recommendations)
-            recall = len(intersection) / len(actual_seq)
+            recall = len(intersection) / len(positive_seq)
             ndcg = compute_ndcg(recommendations, actual_seq, relevance_seq)
 
             precision_log.append(precision)
