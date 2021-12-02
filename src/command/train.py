@@ -56,13 +56,12 @@ def train_agent(
                 action_policy_loss_log.append(action_policy_loss.cpu().item())
                 behavior_policy_loss_log.append(behavior_policy_loss.cpu().item())
 
-            if device.type == "cuda":
-                torch.cuda.empty_cache()
-
         if debug:
-            print(f"1. Epoch {epoch}'s final action policy loss: {action_policy_loss}")
             print(
-                f"2. Epoch {epoch}'s final behavior policy loss: {behavior_policy_loss}"
+                f"1. Epoch {epoch}'s final action policy loss: {action_policy_loss.cpu().item()}"
+            )
+            print(
+                f"2. Epoch {epoch}'s final behavior policy loss: {behavior_policy_loss.cpu().item()}"
             )
 
         print("=" * 80)
