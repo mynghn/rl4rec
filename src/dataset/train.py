@@ -10,11 +10,13 @@ from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.functions import (
     col,
     collect_list,
+    countDistinct,
     from_unixtime,
     lit,
     monotonically_increasing_id,
     regexp_extract,
     regexp_replace,
+    row_number,
     size,
     udf,
 )
@@ -22,7 +24,6 @@ from pyspark.sql.types import (
     ArrayType,
     BooleanType,
     FloatType,
-    IntegerType,
     LongType,
     StringType,
     StructField,
@@ -36,11 +37,8 @@ class AmazonReviewTrainDataset(Dataset):
     ratings_fetching_schema = StructType(
         [
             StructField("reviewerID", StringType()),
-            StructField("reviewerName", StringType()),
             StructField("asin", StringType()),
             StructField("overall", FloatType()),
-            StructField("vote", IntegerType()),
-            StructField("reviewTime", StringType()),
             StructField("unixReviewTime", LongType()),
             StructField("verified", BooleanType()),
         ]
@@ -79,9 +77,6 @@ class AmazonReviewTrainDataset(Dataset):
         self.ratings: DataFrame = self._get_ratings_df(
             os.path.join(data_path, f"{self.category_name.replace(' ', '_')}.json")
         )
-        self.item_metadata: DataFrame = self._get_metadata_df(
-            os.path.join(data_path, f"meta_{self.category_name.replace(' ', '_')}.json")
-        )
 
         self.item_index_map: DataFrame = self._build_item_index_map()
         self.data: np.ndarray = self._build_episodic_data()
@@ -89,15 +84,44 @@ class AmazonReviewTrainDataset(Dataset):
     def _get_ratings_df(self, json_path: str) -> DataFrame:
         raw = self.spark.read.schema(self.ratings_fetching_schema).json(json_path)
 
-        preprocessed = raw.withColumn("timestamp", from_unixtime("unixReviewTime"))
+        # 1. Filter unverified ratings
+        preprocessed = raw.filter("verified").drop("verified")
+
+        # 2. Collect only ratings within training time window
         if self.start_date:
             preprocessed = preprocessed.filter(
-                col("timestamp").cast("date") >= self.start_date
+                from_unixtime("unixReviewTime").cast("date") >= self.start_date
             )
         if self.end_date:
             preprocessed = preprocessed.filter(
-                col("timestamp").cast("date") <= self.end_date
+                from_unixtime("unixReviewTime").cast("date") <= self.end_date
             )
+
+        # 3. Give up on ratings gave by same user to same item at same date and has different overall
+        giveups_filtered = (
+            preprocessed.groupBy("reviewerID", "asin", "unixReviewTime")
+            .agg(countDistinct("overall").alias("num_overalls"))
+            .filter(col("num_overalls") == 1)
+            .drop("num_overalls")
+        )
+        preprocessed = preprocessed.join(
+            giveups_filtered, ["reviewerID", "asin", "unixReviewTime"]
+        )
+
+        # 4. Preserve only the latest rating that user gave to same item
+        preprocessed = (
+            preprocessed.withColumn(
+                "is_latest",
+                row_number().over(
+                    W.partitionBy("reviewerID", "asin").orderBy(
+                        col("unixReviewTime").desc()
+                    )
+                )
+                == lit(1),
+            )
+            .filter("is_latest")
+            .drop("is_latest")
+        )
 
         return preprocessed
 
