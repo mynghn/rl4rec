@@ -230,62 +230,6 @@ class AmazonReviewTrainDataset(Dataset):
         return user_history, action, _return
 
 
-@dataclass
-class PaddedNSortedUserHistoryBatch:
-    data: torch.LongTensor
-    lengths: torch.LongTensor
-
-
-class UserItemEpisodeTrainLoader(DataLoader):
-    padding_signal = -1
-
-    def __init__(self, *args, **kargs):
-        super().__init__(*args, **kargs, collate_fn=self.collate_function)
-
-    @staticmethod
-    def collate_function(
-        batch: List[Tuple[List[int], int, float]],
-    ) -> Tuple[PaddedNSortedUserHistoryBatch, torch.LongTensor, torch.FloatTensor]:
-        batch_size = len(batch)
-        user_history, action, _return = tuple(np.array(batch, dtype=object).T)
-
-        padded_user_history, lengths = UserItemEpisodeTrainLoader.pad_sequence(
-            user_history
-        )
-        sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
-
-        return (
-            PaddedNSortedUserHistoryBatch(
-                data=padded_user_history[sorted_idx],
-                lengths=sorted_lengths,
-            ),
-            torch.from_numpy(action.astype(np.int64)).view(batch_size, -1),
-            torch.from_numpy(_return.astype(np.float32)).view(batch_size, -1),
-        )
-
-    @staticmethod
-    def pad_sequence(
-        user_history: Sequence[Sequence[int]],
-    ) -> Tuple[torch.LongTensor, torch.LongTensor]:
-        lengths = torch.LongTensor([len(seq) for seq in user_history])
-        max_length = lengths.max()
-        padded = torch.stack(
-            [
-                torch.cat(
-                    [
-                        torch.LongTensor(item_seq),
-                        torch.zeros(max_length - len(item_seq))
-                        + UserItemEpisodeTrainLoader.padding_signal,
-                    ]
-                ).long()
-                for item_seq in user_history
-            ]
-        )
-        return padded, lengths
-
-    import datetime
-
-
 class AmazonReviewEvalDataset(Dataset):
     ratings_fetching_schema = StructType(
         [
@@ -395,6 +339,60 @@ class AmazonReviewEvalDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[str, List[int], int, float]:
         user_id, user_history, episode, relevance = self.data[idx]
         return user_id, user_history, episode, relevance
+
+
+@dataclass
+class PaddedNSortedUserHistoryBatch:
+    data: torch.LongTensor
+    lengths: torch.LongTensor
+
+
+class UserItemEpisodeTrainLoader(DataLoader):
+    padding_signal = -1
+
+    def __init__(self, *args, **kargs):
+        super().__init__(*args, **kargs, collate_fn=self.collate_function)
+
+    @staticmethod
+    def collate_function(
+        batch: List[Tuple[List[int], int, float]],
+    ) -> Tuple[PaddedNSortedUserHistoryBatch, torch.LongTensor, torch.FloatTensor]:
+        batch_size = len(batch)
+        user_history, action, _return = tuple(np.array(batch, dtype=object).T)
+
+        padded_user_history, lengths = UserItemEpisodeTrainLoader.pad_sequence(
+            user_history
+        )
+        sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
+
+        return (
+            PaddedNSortedUserHistoryBatch(
+                data=padded_user_history[sorted_idx],
+                lengths=sorted_lengths,
+            ),
+            torch.from_numpy(action.astype(np.int64)).view(batch_size, -1),
+            torch.from_numpy(_return.astype(np.float32)).view(batch_size, -1),
+        )
+
+    @staticmethod
+    def pad_sequence(
+        user_history: Sequence[Sequence[int]],
+    ) -> Tuple[torch.LongTensor, torch.LongTensor]:
+        lengths = torch.LongTensor([len(seq) for seq in user_history])
+        max_length = lengths.max()
+        padded = torch.stack(
+            [
+                torch.cat(
+                    [
+                        torch.LongTensor(item_seq),
+                        torch.zeros(max_length - len(item_seq))
+                        + UserItemEpisodeTrainLoader.padding_signal,
+                    ]
+                ).long()
+                for item_seq in user_history
+            ]
+        )
+        return padded, lengths
 
 
 class UserItemEpisodeEvalLoader(DataLoader):
