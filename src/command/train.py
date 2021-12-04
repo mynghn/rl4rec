@@ -44,11 +44,11 @@ def train_agent(
             # 2. Compute Policy Losses
             action_policy_loss = agent.action_policy_loss(
                 state=state,
-                action_index=batch_dict["action_index"],
                 episodic_return=batch_dict["return"],
+                item_index=batch_dict["item_index"],
             )
             behavior_policy_loss = agent.behavior_policy_loss(
-                state=state, action_index=batch_dict["action_index"]
+                state=state, item_index=batch_dict["item_index"]
             )
 
             # 3. Gradient update agent w/ computed losses
