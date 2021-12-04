@@ -1,5 +1,8 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
+from torch._C import OptionalType
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from ..dataset.custom_typings import PaddedNSortedUserHistoryBatch
@@ -50,15 +53,30 @@ class StateTransitionNetwork(nn.Module):
                 embedding_dim=item_feature_embedding_dim,
             )
 
-    def forward(self, *args, **kargs) -> torch.FloatTensor:
-        if self.user_feature_enabled and self.item_feature_enabled:
-            self.forward_w_user_item_feature(*args, **kargs)
-        elif self.user_feature_enabled:
-            self.forward_w_user_feature(*args, **kargs)
-        elif self.item_feature_enabled:
-            self.forward_w_item_feature(*args, **kargs)
+    def forward(
+        self,
+        user_history: PaddedNSortedUserHistoryBatch,
+        user_feature_index: Optional[torch.LongTensor] = None,
+        item_feature_index: Optional[torch.LongTensor] = None,
+    ) -> torch.FloatTensor:
+        if user_feature_index and item_feature_index:
+            self.forward_w_user_item_feature(
+                user_history=user_history,
+                user_feature_index=user_feature_index,
+                item_feature_index=item_feature_index,
+            )
+        elif user_feature_index:
+            self.forward_w_user_feature(
+                user_history=user_history,
+                user_feature_index=user_feature_index,
+            )
+        elif item_feature_index:
+            self.forward_w_item_feature(
+                user_history=user_history,
+                item_feature_index=item_feature_index,
+            )
         else:
-            self.forward_only_user_history(*args, **kargs)
+            self.forward_only_user_history(user_history=user_history)
 
     def forward_only_user_history(
         self, user_history: PaddedNSortedUserHistoryBatch
