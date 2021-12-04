@@ -1,6 +1,5 @@
 import datetime
 import os
-from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -32,6 +31,8 @@ from pyspark.sql.types import (
 )
 from pyspark.sql.window import Window as W
 from torch.utils.data import DataLoader, Dataset
+
+from .custom_typings import PaddedNSortedUserHistoryBatch
 
 
 class AmazonReviewTrainDataset(Dataset):
@@ -339,12 +340,6 @@ class AmazonReviewEvalDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[str, List[int], int, float]:
         user_id, user_history, episode, relevance = self.data[idx]
         return user_id, user_history, episode, relevance
-
-
-@dataclass
-class PaddedNSortedUserHistoryBatch:
-    data: torch.LongTensor
-    lengths: torch.LongTensor
 
 
 class UserItemEpisodeTrainLoader(DataLoader):
