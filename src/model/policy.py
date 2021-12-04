@@ -7,25 +7,25 @@ import torch.nn as nn
 class SoftmaxStochasticPolicy(nn.Module):
     def __init__(
         self,
-        n_actions: int,
-        action_embedding_dim: int,
+        n_itmes: int,
+        items_embedding_dim: int,
         adaptive_softmax: bool = False,
         softmax_cutoffs: Sequence = None,
         softmax_temperature: float = 1.0,
     ):
         super(SoftmaxStochasticPolicy, self).__init__()
 
-        self.action_space = torch.arange(n_actions)
+        self.action_space = torch.arange(n_itmes)
         self.action_embeddings = nn.Embedding(
-            num_embeddings=n_actions,
-            embedding_dim=action_embedding_dim,
+            num_embeddings=n_itmes,
+            embedding_dim=items_embedding_dim,
         )
 
         self.adaptive_softmax = adaptive_softmax
         if self.adaptive_softmax is True:
             self.softmax = nn.AdaptiveLogSoftmaxWithLoss(
                 in_features=1,
-                n_classes=n_actions,
+                n_classes=n_itmes,
                 cutoffs=softmax_cutoffs,
             )
         else:
