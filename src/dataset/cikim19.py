@@ -57,6 +57,9 @@ class CIKIM19Dataset(Dataset):
         ]
     )
 
+    user_feature_cols = ("sex", "age", "purpower")
+    item_feature_cols = ("category", "brand", "shop")
+
     def __init__(
         self,
         data_path: str,
@@ -87,6 +90,10 @@ class CIKIM19Dataset(Dataset):
 
         self.logs: DataFrame = self._build_event_logs()
         self.user_action_index_map: DataFrame = self._build_user_action_index_map()
+        self.user_feature_index_map: DataFrame = self._build_user_feature_index_map()
+        self.item_feature_index_map: DataFrame = self._build_item_feature_index_map()
+        self.item_index_map: DataFrame = self._build_item_index_map()
+
         self.data: np.ndarray = self._build_episodic_data()
 
     def _build_event_logs(self) -> DataFrame:
@@ -235,6 +242,34 @@ class CIKIM19Dataset(Dataset):
             .withColumn("user_action_index", monotonically_increasing_id())
         )
 
+    def _build_user_feature_index_map(self) -> DataFrame:
+        return (
+            self.logs.select(*self.user_feature_cols)
+            .distinct()
+            .coalesce(1)
+            .orderBy(*self.user_feature_cols)
+            .withColumn("user_feature_index", monotonically_increasing_id())
+        )
+
+    def _build_item_feature_index_map(self) -> DataFrame:
+
+        return (
+            self.logs.select(*self.item_feature_cols)
+            .distinct()
+            .coalesce(1)
+            .orderBy(*self.item_feature_cols)
+            .withColumn("item_feature_index", monotonically_increasing_id())
+        )
+
+    def _build_item_index_map(self) -> DataFrame:
+        return (
+            self.logs.select("item")
+            .distinct()
+            .coalesce(1)
+            .orderBy("item")
+            .withColumn("item_index", monotonically_increasing_id())
+        )
+
     @staticmethod
     @udf(FloatType())
     def _compute_return(rewards: List[float], discount_factor: float) -> float:
@@ -242,23 +277,7 @@ class CIKIM19Dataset(Dataset):
         return float(gammas @ np.array(rewards))
 
     def _build_episodic_data(self) -> np.ndarray:
-        user_feature_cols = ("sex", "age", "purpower")
-        user_feature_index_map = (
-            self.logs.select(*user_feature_cols)
-            .distinct()
-            .coalesce(1)
-            .orderBy(*user_feature_cols)
-            .withColumn("user_feature_index", monotonically_increasing_id())
-        )
-        item_feature_cols = ("category", "brand", "shop")
-        item_feature_index_map = (
-            self.logs.select(*item_feature_cols)
-            .distinct()
-            .coalesce(1)
-            .orderBy(*item_feature_cols)
-            .withColumn("item_feature_index", monotonically_increasing_id())
-        )
-        logs = (
+        logs_template = (
             self.logs.join(self.user_action_index_map, on=["item", "event"], how="left")
             .withColumn(
                 "user_history",
@@ -269,8 +288,13 @@ class CIKIM19Dataset(Dataset):
                 ),
             )
             .filter(size("user_history") > 0)
-            .join(user_feature_index_map, on=[*user_feature_cols], how="left")
-            .join(item_feature_index_map, on=[*item_feature_cols], how="left")
+            .join(
+                self.user_feature_index_map, on=[*self.user_feature_cols], how="inner"
+            )
+            .join(
+                self.item_feature_index_map, on=[*self.item_feature_cols], how="inner"
+            )
+            .join(self.item_index_map, on=["item"], how="inner")
         )
 
         if self.train is True:
@@ -279,10 +303,10 @@ class CIKIM19Dataset(Dataset):
                 "user_feature_index",
                 "item_feature_index",
                 "return",
-                "user_action_index",
+                "item_index",
             )
             episodes_df = (
-                logs.withColumn(
+                logs_template.withColumn(
                     "reward_episode",
                     collect_list("reward").over(
                         W.partitionBy("user")
@@ -302,13 +326,13 @@ class CIKIM19Dataset(Dataset):
                 "user_history",
                 "user_feature_index",
                 "item_feature_index",
-                "item_episode",
+                "item_index_episode",
                 "reward_episode",
             )
             episodes_df = (
-                logs.withColumn(
-                    "item_episode",
-                    collect_list("item").over(
+                logs_template.withColumn(
+                    "item_index_episode",
+                    collect_list("item_index").over(
                         W.partitionBy("user")
                         .orderBy("time")
                         .rowsBetween(W.currentRow, W.unboundedFollowing)
@@ -380,8 +404,8 @@ class CIKIM19DataLoader(DataLoader):
             user_history,
             user_feature_index,
             item_feature_index,
-            user_action_index,
             _return,
+            item_index,
         ) = tuple(np.array(batch, dtype=object).T)
 
         padded_user_history, lengths = CIKIM19DataLoader.pad_sequence(user_history)
@@ -399,9 +423,9 @@ class CIKIM19DataLoader(DataLoader):
                 item_feature_index.astype(np.int64)
             ).view(batch_size, -1),
             "return": torch.from_numpy(_return.astype(np.float32)).view(batch_size, -1),
-            "user_action_index": torch.from_numpy(
-                user_action_index.astype(np.int64)
-            ).view(batch_size, -1),
+            "item_index": torch.from_numpy(item_index.astype(np.int64)).view(
+                batch_size, -1
+            ),
         }
 
     @staticmethod
@@ -423,7 +447,7 @@ class CIKIM19DataLoader(DataLoader):
             user_history,
             user_feature_index,
             item_feature_index,
-            item_episode,
+            item_index_episode,
             reward_episode,
         ) = tuple(np.array(batch, dtype=object).T)
 
@@ -442,6 +466,6 @@ class CIKIM19DataLoader(DataLoader):
             "item_feature_index": torch.from_numpy(
                 item_feature_index.astype(np.int64)
             ).view(batch_size, -1),
-            "item_episode": [list(seq) for seq in item_episode],
+            "item_index_episode": [list(seq) for seq in item_index_episode],
             "reward_episode": [torch.FloatTensor(seq) for seq in reward_episode],
         }
