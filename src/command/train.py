@@ -2,15 +2,15 @@ import time
 from typing import List, Optional, Tuple
 
 import torch
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from ..dataset.train import UserItemEpisodeTrainLoader
 from ..model.agent import TopKOfflineREINFORCE
 
 
 def train_agent(
     agent: TopKOfflineREINFORCE,
-    train_loader: UserItemEpisodeTrainLoader,
+    train_loader: DataLoader,
     n_epochs: int,
     device: torch.device = torch.device("cpu"),
     debug: bool = True,
@@ -22,13 +22,9 @@ def train_agent(
         print(f"\nEpoch {epoch} started at: {start_time}\n")
 
         agent.train()
-        for prev_item_sequence, action, episodic_return in tqdm(
-            train_loader, desc="train"
-        ):
+        for batch_dict in tqdm(train_loader, desc="train"):
             if device.type != "cpu":
-                prev_item_sequence.data = prev_item_sequence.data.to(device)
-                action = action.to(device)
-                episodic_return = episodic_return.to(device)
+                batch_dict = {k: v.to(device) for k, v in batch_dict.items()}
 
                 agent = agent.to(device)
                 agent.action_policy.action_space = agent.action_policy.action_space.to(
@@ -38,15 +34,24 @@ def train_agent(
                     agent.behavior_policy.action_space.to(device)
                 )
 
-            user_state = agent.state_network(prev_item_sequence)
+            # 1. Build State
+            state = agent.state_network(
+                user_history=batch_dict["user_history"],
+                user_feature_index=batch_dict.get("user_feature_index"),
+                item_feature_index=batch_dict.get("item_feature_index"),
+            )
 
+            # 2. Compute Policy Losses
             action_policy_loss = agent.action_policy_loss(
-                state=user_state, action=action, episodic_return=episodic_return
+                state=state,
+                action_index=batch_dict["action_index"],
+                episodic_return=batch_dict["return"],
             )
             behavior_policy_loss = agent.behavior_policy_loss(
-                state=user_state, action=action
+                state=state, action_index=batch_dict["action_index"]
             )
 
+            # 3. Gradient update agent w/ computed losses
             agent.update(
                 action_policy_loss=action_policy_loss,
                 behavior_policy_loss=behavior_policy_loss,
