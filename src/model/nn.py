@@ -22,10 +22,11 @@ class StateTransitionNetwork(nn.Module):
         n_item_features: int = None,
     ):
         super(StateTransitionNetwork, self).__init__()
+        self.padding_signal = padding_singal
         self.item_embeddings = nn.Embedding(
             num_embeddings=n_actions + 1,
             embedding_dim=action_embedding_dim,
-            padding_idx=-1,
+            padding_idx=self.padding_signal,
         )
         self.rnn = nn.GRU(
             input_size=action_embedding_dim,
@@ -35,8 +36,6 @@ class StateTransitionNetwork(nn.Module):
             bias=True,
             batch_first=True,
         )
-
-        self.padding_signal = padding_singal
 
         self.user_feature_enabled = user_feature
         if self.user_feature_enabled is True:
