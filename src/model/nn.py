@@ -9,26 +9,26 @@ class StateTransitionNetwork(nn.Module):
     def __init__(
         self,
         n_actions: int,
-        action_embedding_size: int,
+        action_embedding_dim: int,
         hidden_size: int,
         padding_singal: int,
         num_layers: int = 1,
         dropout: int = 0,
         user_feature: bool = False,
-        user_feature_dim: int = None,
+        user_feature_embedding_dim: int = None,
         n_user_features: int = None,
         item_feature: bool = False,
-        item_feature_dim: int = None,
+        item_feature_embedding_dim: int = None,
         n_item_features: int = None,
     ):
         super(StateTransitionNetwork, self).__init__()
         self.item_embeddings = nn.Embedding(
             num_embeddings=n_actions + 1,
-            embedding_dim=action_embedding_size,
+            embedding_dim=action_embedding_dim,
             padding_idx=-1,
         )
         self.rnn = nn.GRU(
-            input_size=action_embedding_size,
+            input_size=action_embedding_dim,
             hidden_size=hidden_size,
             num_layers=num_layers,
             dropout=dropout,
@@ -42,13 +42,13 @@ class StateTransitionNetwork(nn.Module):
         if self.user_feature_enabled is True:
             self.user_feature_embeddings = nn.Embedding(
                 num_embeddings=n_user_features,
-                embedding_dim=user_feature_dim,
+                embedding_dim=user_feature_embedding_dim,
             )
         self.item_feature_enabled = item_feature
         if self.item_feature_enabled is True:
             self.item_feature_embeddings = nn.Embedding(
                 num_embeddings=n_item_features,
-                embedding_dim=item_feature_dim,
+                embedding_dim=item_feature_embedding_dim,
             )
 
     def forward(self, *args, **kargs) -> torch.FloatTensor:
