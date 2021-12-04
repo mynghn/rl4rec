@@ -1,0 +1,434 @@
+import os
+from random import randint
+from typing import Any, List, Sequence, Tuple
+
+import numpy as np
+import torch
+from pyspark.sql import SparkSession
+from pyspark.sql.dataframe import DataFrame
+from pyspark.sql.functions import (
+    col,
+    collect_list,
+    count,
+    lit,
+    monotonically_increasing_id,
+    percent_rank,
+    size,
+    udf,
+    when,
+)
+from pyspark.sql.types import (
+    FloatType,
+    IntegerType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
+from pyspark.sql.window import Window as W
+from torch.utils.data import DataLoader, Dataset
+
+from .custom_typings import PaddedNSortedUserHistoryBatch
+
+
+class CIKIM19Dataset(Dataset):
+    users_fetching_schema = StructType(
+        [
+            StructField("user", StringType()),
+            StructField("sex", StringType()),
+            StructField("age", IntegerType()),
+            StructField("pur_power", IntegerType()),
+        ]
+    )
+    items_fetching_schema = StructType(
+        [
+            StructField("item", StringType()),
+            StructField("category", StringType()),
+            StructField("shop", StringType()),
+            StructField("brand", StringType()),
+        ]
+    )
+    events_fetching_schema = StructType(
+        [
+            StructField("user", StringType()),
+            StructField("item", StringType()),
+            StructField("event", StringType()),
+            StructField("time", LongType()),
+        ]
+    )
+
+    def __init__(
+        self,
+        data_path: str,
+        spark: SparkSession,
+        train: bool,
+        split_ratio: float,
+        sequence_length_cutoffs: Tuple[Tuple[int, int], Tuple[int, int]] = (
+            (6, 50),
+            (51, 200),
+        ),
+        n_samples: Tuple(int, int) = (20000, 60000),
+        category_id: str = None,
+        discount_factor: float = 1e-2,
+    ):
+        self.data_path = data_path
+        self.spark = spark
+
+        self.train = train
+        self.split_ratio = split_ratio
+
+        self.cutoffs = sequence_length_cutoffs
+        self.n_samples = n_samples
+        self.sample_seed = randint(0, 9)
+
+        self.category_id = category_id
+
+        self.discount_factor = discount_factor
+
+        self.logs: DataFrame = self._build_event_logs()
+        self.action_index_map: DataFrame = self._build_action_index_map()
+        self.data: np.ndarray = self._build_episodic_data()
+
+    def _build_event_logs(self) -> DataFrame:
+        users_df = self.spark.read.schema(self.users_fetching_schema).csv(
+            os.path.join(self.data_path, "user.csv")
+        )
+        items_df = self.spark.read.schema(self.items_fetching_schema).csv(
+            os.path.join(self.data_path, "item.csv")
+        )
+        events_df = self.spark.read.schema(self.events_fetching_schema).csv(
+            os.path.join(self.data_path, "user_behavior.csv")
+        )
+
+        # 1. Split data
+        if self.train is True:
+            preprocessed = (
+                events_df.withColumn(
+                    "percent_rank", percent_rank().over(W.partitionBy().orderBy("time"))
+                )
+                .filter(col("percent_rank") <= self.split_ratio)
+                .drop("percent_rank")
+            )
+        else:
+            preprocessed = (
+                events_df.withColumn(
+                    "percent_rank", percent_rank().over(W.partitionBy().orderBy("time"))
+                )
+                .filter(col("percent_rank") > 1.0 - self.split_ratio)
+                .drop("percent_rank")
+            )
+
+        # 2. Alleviate user's sequence length imbalance
+        user_seq_len = preprocessed.groupBy("user").agg(
+            count("*").alias("sequence_length")
+        )
+        users_w_short_seq = user_seq_len.filter(
+            col("sequence_length").between(*self.cutoffs[0])
+        ).drop("sequence_length")
+        users_w_long_seq = user_seq_len.filter(
+            col("sequence_length").between(*self.cutoffs[-1])
+        ).drop("sequence_length")
+        n_short = users_w_short_seq.count()
+        n_long = users_w_long_seq.count()
+
+        if n_short < self.n_samples[0] and n_long < self.n_samples[-1]:
+            short_long_ratio = self.n_samples[0] / self.n_samples[-1]
+            if n_short / n_long - 1e-2 < short_long_ratio < n_short / n_long + 1e-2:
+                users_w_short_seq_sampled = users_w_short_seq
+                users_w_long_seq_sampled = users_w_long_seq
+            elif short_long_ratio > n_short / n_long:
+                users_w_short_seq_sampled = users_w_short_seq
+                _ratio_long = n_short / short_long_ratio / n_long
+                users_w_long_seq_sampled = users_w_long_seq.sample(
+                    _ratio_long, self.sample_seed
+                )
+            elif short_long_ratio < n_short / n_long:
+                _ratio_short = n_long * short_long_ratio / n_short
+                users_w_short_seq_sampled = users_w_short_seq.sample(
+                    _ratio_short, self.sample_seed
+                )
+                users_w_long_seq_sampled = users_w_long_seq
+        elif n_short < self.n_samples[0]:
+            users_w_short_seq_sampled = users_w_short_seq
+            _ratio_long = n_short * self.n_samples[-1] / self.n_samples[0] / n_long
+            users_w_long_seq_sampled = users_w_long_seq.sample(
+                _ratio_long, self.sample_seed
+            )
+        elif n_long < self.n_samples[-1]:
+            _ratio_short = n_long * self.n_samples[0] / self.n_samples[-1] / n_short
+            users_w_short_seq_sampled = users_w_short_seq.sample(
+                _ratio_short, self.sample_seed
+            )
+            users_w_long_seq_sampled = users_w_long_seq
+        else:
+            _ratio_short = self.n_samples[0] / n_short
+            users_w_short_seq_sampled = users_w_short_seq.sample(
+                _ratio_short, self.sample_seed
+            )
+            _ratio_long = self.n_samples[-1] / n_long
+            users_w_long_seq_sampled = users_w_long_seq.sample(
+                _ratio_long, self.sample_seed
+            )
+
+        users_sampled = users_w_short_seq_sampled.union(users_w_long_seq_sampled)
+        preprocessed = preprocessed.join(users_sampled, ["user"], "inner")
+
+        # 3. Assign reward values
+        preprocessed = preprocessed.withColumn(
+            "reward",
+            when(col("event") == "pv", lit(1.0))
+            .when(col("event") == "fav", lit(2.0))
+            .when(col("event") == "cart", lit(3.0))
+            .when(col("event") == "buy", lit(5.0))
+            .otherwise(lit(None)),
+        ).filter(col("reward").isNotNull())
+
+        # 4. Merge & Collect only events with items in specific category
+        if self.category_id:
+            preprocessed = (
+                preprocessed.join(users_df, on=["user"], how="left")
+                .join(
+                    items_df.withColumn(
+                        "in_category", col("category") == self.category_id
+                    ),
+                    on=["item"],
+                    how="left",
+                )
+                .filter("in_category")
+            )
+        else:
+            preprocessed = preprocessed.join(users_df, on=["user"], how="left").join(
+                items_df,
+                on=["item"],
+                how="left",
+            )
+
+        # 5. Age binning
+        preprocessed = preprocessed.withColumn(
+            "age",
+            when(col("age") < 30, lit(0))
+            .when(col("age") < 50, lit(1))
+            .when(col("age") < 70, lit(2))
+            .otherwise(lit(3)),
+        )
+
+        return preprocessed.select(
+            "time",
+            "user",
+            "sex",
+            "age",
+            "pur_power",
+            "item",
+            "category",
+            "shop",
+            "brand",
+            "reward",
+        )
+
+    def _build_action_index_map(self) -> DataFrame:
+        return (
+            self.logs.select("item", "reward")
+            .distinct()
+            .coalesce(1)
+            .orderBy("item", "reward")
+            .withColumn("action_index", monotonically_increasing_id())
+        )
+
+    @staticmethod
+    @udf(FloatType())
+    def _compute_return(rewards: List[float], discount_factor: float) -> float:
+        gammas = (1.0 - discount_factor) ** np.arange(len(rewards))
+        return float(gammas @ np.array(rewards))
+
+    def _build_episodic_data(self) -> np.ndarray:
+        user_feature_cols = ("sex", "age", "purpower")
+        user_feature_index_map = (
+            self.logs.select(*user_feature_cols)
+            .distinct()
+            .coalesce(1)
+            .orderBy(*user_feature_cols)
+            .withColumn("user_feature_index", monotonically_increasing_id())
+        )
+        item_feature_cols = ("category", "brand", "shop")
+        item_feature_index_map = (
+            self.logs.select(*item_feature_cols)
+            .distinct()
+            .coalesce(1)
+            .orderBy(*item_feature_cols)
+            .withColumn("item_feature_index", monotonically_increasing_id())
+        )
+        logs = (
+            self.logs.join(self.action_index_map, on=["item", "reward"], how="left")
+            .withColumn(
+                "user_history",
+                collect_list("action_index").over(
+                    W.partitionBy("user")
+                    .orderBy("time")
+                    .rowsBetween(W.unboundedPreceding, -1)
+                ),
+            )
+            .filter(size("user_history") > 0)
+            .join(user_feature_index_map, on=[*user_feature_cols], how="left")
+            .join(item_feature_index_map, on=[*item_feature_cols], how="left")
+        )
+
+        if self.train is True:
+            cols = (
+                "user_history",
+                "user_feature_index",
+                "item_feature_index",
+                "return",
+                "action",
+            )
+            episodes_df = (
+                logs.withColumn(
+                    "reward_episode",
+                    collect_list("reward").over(
+                        W.partitionBy("user")
+                        .orderBy("time")
+                        .rowsBetween(W.currentRow, W.unboundedFollowing)
+                    ),
+                )
+                .withColumn("discount_factor", lit(self.discount_factor))
+                .withColumn(
+                    "return", self._compute_return("reward_episode", "discount_factor")
+                )
+                .withColumnRenamed("item_index", "action")
+                .select(*cols)
+            )
+        else:
+            cols = (
+                "user",
+                "user_history",
+                "user_feature_index",
+                "item_feature_index",
+                "item_episode",
+                "reward_episode",
+            )
+            episodes_df = (
+                logs.withColumn(
+                    "item_episode",
+                    collect_list("item").over(
+                        W.partitionBy("user")
+                        .orderBy("time")
+                        .rowsBetween(W.currentRow, W.unboundedFollowing)
+                    ),
+                )
+                .withColumn(
+                    "reward_episode",
+                    collect_list("reward").over(
+                        W.partitionBy("user")
+                        .orderBy("time")
+                        .rowsBetween(W.currentRow, W.unboundedFollowing)
+                    ),
+                )
+                .select(*cols)
+            )
+
+        return np.array([(row[col] for col in cols) for row in episodes_df.collect()])
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __getitem__(self, idx: int) -> Any:
+        return self.data[idx]
+
+
+class CIKIM19DataLoader(DataLoader):
+    padding_signal = -1
+
+    def __init__(self, train: bool, *args, **kargs):
+        self.train = train
+        if self.train is True:
+            super().__init__(*args, **kargs, collate_fn=self.train_collate_func)
+        else:
+            super().__init__(*args, **kargs, collate_fn=self.eval_collate_func)
+
+    @staticmethod
+    def pad_sequence(
+        user_history: Sequence[Sequence[int]],
+    ) -> Tuple[torch.LongTensor, torch.LongTensor]:
+        lengths = torch.LongTensor([len(seq) for seq in user_history])
+        max_length = lengths.max()
+        padded = torch.stack(
+            [
+                torch.cat(
+                    [
+                        torch.LongTensor(item_seq),
+                        torch.zeros(max_length - len(item_seq))
+                        + CIKIM19DataLoader.padding_signal,
+                    ]
+                ).long()
+                for item_seq in user_history
+            ]
+        )
+        return padded, lengths
+
+    @staticmethod
+    def train_collate_func(
+        batch: List[Tuple[List[int], int, int, float, int]],
+    ) -> Tuple[
+        PaddedNSortedUserHistoryBatch,
+        torch.LongTensor,
+        torch.LongTensor,
+        torch.LongTensor,
+        torch.FloatTensor,
+    ]:
+        batch_size = len(batch)
+        (
+            user_history,
+            user_feature_index,
+            item_feature_index,
+            action,
+            _return,
+        ) = tuple(np.array(batch, dtype=object).T)
+
+        padded_user_history, lengths = CIKIM19DataLoader.pad_sequence(user_history)
+        sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
+
+        return (
+            PaddedNSortedUserHistoryBatch(
+                data=padded_user_history[sorted_idx],
+                lengths=sorted_lengths,
+            ),
+            torch.from_numpy(user_feature_index.astype(np.int64)).view(batch_size, -1),
+            torch.from_numpy(item_feature_index.astype(np.int64)).view(batch_size, -1),
+            torch.from_numpy(_return.astype(np.float32)).view(batch_size, -1),
+            torch.from_numpy(action.astype(np.int64)).view(batch_size, -1),
+        )
+
+    @staticmethod
+    def eval_collate_func(
+        batch: List[Tuple[str, List[int], int, int, List[str], List[float]]],
+    ) -> Tuple[
+        List[str],
+        PaddedNSortedUserHistoryBatch,
+        torch.LongTensor,
+        torch.LongTensor,
+        List[List[str]],
+        List[torch.FloatTensor],
+    ]:
+        batch_size = len(batch)
+        (
+            user_id,
+            user_history,
+            user_feature_index,
+            item_feature_index,
+            items,
+            rewards,
+        ) = tuple(np.array(batch, dtype=object).T)
+
+        padded_user_history, lengths = CIKIM19DataLoader.pad_sequence(user_history)
+        sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
+
+        return (
+            list(user_id),
+            PaddedNSortedUserHistoryBatch(
+                data=padded_user_history[sorted_idx],
+                lengths=sorted_lengths,
+            ),
+            torch.from_numpy(user_feature_index.astype(np.int64)).view(batch_size, -1),
+            torch.from_numpy(item_feature_index.astype(np.int64)).view(batch_size, -1),
+            [list(seq) for seq in items],
+            [torch.FloatTensor(seq) for seq in rewards],
+        )
