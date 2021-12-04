@@ -278,7 +278,7 @@ class CIKIM19Dataset(Dataset):
                 "user_feature_index",
                 "item_feature_index",
                 "return",
-                "action",
+                "action_index",
             )
             episodes_df = (
                 logs.withColumn(
@@ -293,7 +293,6 @@ class CIKIM19Dataset(Dataset):
                 .withColumn(
                     "return", self._compute_return("reward_episode", "discount_factor")
                 )
-                .withColumnRenamed("item_index", "action")
                 .select(*cols)
             )
         else:
@@ -379,7 +378,7 @@ class CIKIM19DataLoader(DataLoader):
             user_history,
             user_feature_index,
             item_feature_index,
-            action,
+            action_index,
             _return,
         ) = tuple(np.array(batch, dtype=object).T)
 
@@ -394,7 +393,7 @@ class CIKIM19DataLoader(DataLoader):
             torch.from_numpy(user_feature_index.astype(np.int64)).view(batch_size, -1),
             torch.from_numpy(item_feature_index.astype(np.int64)).view(batch_size, -1),
             torch.from_numpy(_return.astype(np.float32)).view(batch_size, -1),
-            torch.from_numpy(action.astype(np.int64)).view(batch_size, -1),
+            torch.from_numpy(action_index.astype(np.int64)).view(batch_size, -1),
         )
 
     @staticmethod
