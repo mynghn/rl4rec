@@ -53,7 +53,7 @@ class TopKOfflineREINFORCE(nn.Module):
     def action_policy_loss(
         self,
         state: torch.FloatTensor,
-        action_index: torch.LongTensor,
+        item_index: torch.LongTensor,
         episodic_return: torch.FloatTensor,
     ) -> torch.FloatTensor:
         batch_size = episodic_return.size(0)
@@ -61,7 +61,7 @@ class TopKOfflineREINFORCE(nn.Module):
             log_action_policy_probs = self.action_policy(state)
             log_action_policy_prob = torch.cat(
                 [
-                    log_action_policy_probs[batch_idx][action_index[batch_idx]]
+                    log_action_policy_probs[batch_idx][item_index[batch_idx]]
                     for batch_idx in range(batch_size)
                 ]
             ).view(batch_size, -1)
@@ -70,7 +70,7 @@ class TopKOfflineREINFORCE(nn.Module):
             action_policy_probs = self.action_policy(state)
             action_policy_prob = torch.cat(
                 [
-                    action_policy_probs[batch_idx][action_index[batch_idx]]
+                    action_policy_probs[batch_idx][item_index[batch_idx]]
                     for batch_idx in range(batch_size)
                 ]
             ).view(batch_size, -1)
@@ -80,7 +80,7 @@ class TopKOfflineREINFORCE(nn.Module):
             log_behavior_policy_probs = self.behavior_policy(state)
             log_behavior_policy_prob = torch.cat(
                 [
-                    log_behavior_policy_probs[batch_idx][action_index[batch_idx]]
+                    log_behavior_policy_probs[batch_idx][item_index[batch_idx]]
                     for batch_idx in range(batch_size)
                 ]
             ).view(batch_size, -1)
@@ -89,7 +89,7 @@ class TopKOfflineREINFORCE(nn.Module):
             behavior_policy_probs = self.behavior_policy(state)
             behavior_policy_prob = torch.cat(
                 [
-                    behavior_policy_probs[batch_idx][action_index[batch_idx]]
+                    behavior_policy_probs[batch_idx][item_index[batch_idx]]
                     for batch_idx in range(batch_size)
                 ]
             ).view(batch_size, -1)
@@ -106,9 +106,9 @@ class TopKOfflineREINFORCE(nn.Module):
         )
 
     def behavior_policy_loss(
-        self, state: torch.FloatTensor, action_index: torch.LongTensor
+        self, state: torch.FloatTensor, item_index: torch.LongTensor
     ) -> torch.FloatTensor:
-        batch_size = action_index.size(0)
+        batch_size = item_index.size(0)
         if isinstance(self.behavior_policy.softmax, nn.AdaptiveLogSoftmaxWithLoss):
             log_behavior_policy_probs = self.behavior_policy(state)
         else:
@@ -117,7 +117,7 @@ class TopKOfflineREINFORCE(nn.Module):
 
         actual_action_probs = torch.zeros_like(log_behavior_policy_probs)
         for batch_idx in range(batch_size):
-            actual_action_probs[batch_idx][action_index[batch_idx]] = 1.0
+            actual_action_probs[batch_idx][item_index[batch_idx]] = 1.0
 
         return self.kl_div_loss(log_behavior_policy_probs, actual_action_probs)
 
@@ -145,7 +145,7 @@ class TopKOfflineREINFORCE(nn.Module):
             action_policy_probs = self.action_policy(state)
 
         sorted_indices = action_policy_probs.argsort(dim=1, descending=True)
-        items = sorted_indices[:, : self.K]
-        logits = torch.gather(input=action_policy_probs, dim=1, index=items)
+        indexed_items = sorted_indices[:, : self.K]
+        logits = torch.gather(input=action_policy_probs, dim=1, index=indexed_items)
 
-        return list(items), list(logits)
+        return list(indexed_items), list(logits)

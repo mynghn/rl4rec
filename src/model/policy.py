@@ -35,16 +35,16 @@ class SoftmaxStochasticPolicy(nn.Module):
     def forward(self, state: torch.FloatTensor) -> torch.FloatTensor:
         assert state.size(-1) == self.action_embeddings.weight.size(
             -1
-        ), "User state & action embedding should have same size of dimensions."
+        ), "State & item embedding vector size should match."
 
-        actions_embedded = self.action_embeddings(self.action_space)
+        items_embedded = self.action_embeddings(self.action_space)
 
         logits = torch.stack(
-            [torch.sum(s * actions_embedded / self.T, dim=1) for s in state]
+            [torch.sum(s * items_embedded / self.T, dim=1) for s in state]
         )
         if self.adaptive_softmax is True:
-            action_probs = self.softmax(logits, self.action_space).output
+            item_probs = self.softmax(logits, self.action_space).output
         else:
-            action_probs = self.softmax(logits)
+            item_probs = self.softmax(logits)
 
-        return action_probs
+        return item_probs
