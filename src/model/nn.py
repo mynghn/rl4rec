@@ -2,7 +2,6 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from torch._C import OptionalType
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from ..dataset.custom_typings import PaddedNSortedUserHistoryBatch
