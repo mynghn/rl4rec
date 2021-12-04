@@ -86,7 +86,7 @@ class CIKIM19Dataset(Dataset):
         self.discount_factor = discount_factor
 
         self.logs: DataFrame = self._build_event_logs()
-        self.action_index_map: DataFrame = self._build_action_index_map()
+        self.user_action_index_map: DataFrame = self._build_user_action_index_map()
         self.data: np.ndarray = self._build_episodic_data()
 
     def _build_event_logs(self) -> DataFrame:
@@ -222,16 +222,17 @@ class CIKIM19Dataset(Dataset):
             "category",
             "shop",
             "brand",
+            "event",
             "reward",
         )
 
-    def _build_action_index_map(self) -> DataFrame:
+    def _build_user_action_index_map(self) -> DataFrame:
         return (
-            self.logs.select("item", "reward")
+            self.logs.select("item", "event")
             .distinct()
             .coalesce(1)
-            .orderBy("item", "reward")
-            .withColumn("action_index", monotonically_increasing_id())
+            .orderBy("item", "event")
+            .withColumn("user_action_index", monotonically_increasing_id())
         )
 
     @staticmethod
@@ -258,10 +259,10 @@ class CIKIM19Dataset(Dataset):
             .withColumn("item_feature_index", monotonically_increasing_id())
         )
         logs = (
-            self.logs.join(self.action_index_map, on=["item", "reward"], how="left")
+            self.logs.join(self.user_action_index_map, on=["item", "event"], how="left")
             .withColumn(
                 "user_history",
-                collect_list("action_index").over(
+                collect_list("user_action_index").over(
                     W.partitionBy("user")
                     .orderBy("time")
                     .rowsBetween(W.unboundedPreceding, -1)
@@ -278,7 +279,7 @@ class CIKIM19Dataset(Dataset):
                 "user_feature_index",
                 "item_feature_index",
                 "return",
-                "action_index",
+                "user_action_index",
             )
             episodes_df = (
                 logs.withColumn(
@@ -379,7 +380,7 @@ class CIKIM19DataLoader(DataLoader):
             user_history,
             user_feature_index,
             item_feature_index,
-            action_index,
+            user_action_index,
             _return,
         ) = tuple(np.array(batch, dtype=object).T)
 
@@ -398,9 +399,9 @@ class CIKIM19DataLoader(DataLoader):
                 item_feature_index.astype(np.int64)
             ).view(batch_size, -1),
             "return": torch.from_numpy(_return.astype(np.float32)).view(batch_size, -1),
-            "action_index": torch.from_numpy(action_index.astype(np.int64)).view(
-                batch_size, -1
-            ),
+            "user_action_index": torch.from_numpy(
+                user_action_index.astype(np.int64)
+            ).view(batch_size, -1),
         }
 
     @staticmethod
