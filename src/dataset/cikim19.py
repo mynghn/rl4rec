@@ -1,6 +1,6 @@
 import os
 from random import randint
-from typing import Any, List, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 import torch
@@ -366,12 +366,13 @@ class CIKIM19DataLoader(DataLoader):
     @staticmethod
     def train_collate_func(
         batch: List[Tuple[List[int], int, int, float, int]],
-    ) -> Tuple[
-        PaddedNSortedUserHistoryBatch,
-        torch.LongTensor,
-        torch.LongTensor,
-        torch.LongTensor,
-        torch.FloatTensor,
+    ) -> Dict[
+        str,
+        Union[
+            PaddedNSortedUserHistoryBatch,
+            torch.LongTensor,
+            torch.FloatTensor,
+        ],
     ]:
         batch_size = len(batch)
         (
@@ -385,27 +386,35 @@ class CIKIM19DataLoader(DataLoader):
         padded_user_history, lengths = CIKIM19DataLoader.pad_sequence(user_history)
         sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
 
-        return (
-            PaddedNSortedUserHistoryBatch(
+        return {
+            "user_history": PaddedNSortedUserHistoryBatch(
                 data=padded_user_history[sorted_idx],
                 lengths=sorted_lengths,
             ),
-            torch.from_numpy(user_feature_index.astype(np.int64)).view(batch_size, -1),
-            torch.from_numpy(item_feature_index.astype(np.int64)).view(batch_size, -1),
-            torch.from_numpy(_return.astype(np.float32)).view(batch_size, -1),
-            torch.from_numpy(action_index.astype(np.int64)).view(batch_size, -1),
-        )
+            "user_feature_index": torch.from_numpy(
+                user_feature_index.astype(np.int64)
+            ).view(batch_size, -1),
+            "item_feature_index": torch.from_numpy(
+                item_feature_index.astype(np.int64)
+            ).view(batch_size, -1),
+            "return": torch.from_numpy(_return.astype(np.float32)).view(batch_size, -1),
+            "action_index": torch.from_numpy(action_index.astype(np.int64)).view(
+                batch_size, -1
+            ),
+        }
 
     @staticmethod
     def eval_collate_func(
         batch: List[Tuple[str, List[int], int, int, List[str], List[float]]],
-    ) -> Tuple[
-        List[str],
-        PaddedNSortedUserHistoryBatch,
-        torch.LongTensor,
-        torch.LongTensor,
-        List[List[str]],
-        List[torch.FloatTensor],
+    ) -> Dict[
+        str,
+        Union[
+            List[str],
+            PaddedNSortedUserHistoryBatch,
+            torch.LongTensor,
+            List[List[str]],
+            List[torch.FloatTensor],
+        ],
     ]:
         batch_size = len(batch)
         (
@@ -413,21 +422,25 @@ class CIKIM19DataLoader(DataLoader):
             user_history,
             user_feature_index,
             item_feature_index,
-            items,
-            rewards,
+            item_episode,
+            reward_episode,
         ) = tuple(np.array(batch, dtype=object).T)
 
         padded_user_history, lengths = CIKIM19DataLoader.pad_sequence(user_history)
         sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
 
-        return (
-            list(user_id),
-            PaddedNSortedUserHistoryBatch(
+        return {
+            "user_id": list(user_id),
+            "user_history": PaddedNSortedUserHistoryBatch(
                 data=padded_user_history[sorted_idx],
                 lengths=sorted_lengths,
             ),
-            torch.from_numpy(user_feature_index.astype(np.int64)).view(batch_size, -1),
-            torch.from_numpy(item_feature_index.astype(np.int64)).view(batch_size, -1),
-            [list(seq) for seq in items],
-            [torch.FloatTensor(seq) for seq in rewards],
-        )
+            "user_feature_index": torch.from_numpy(
+                user_feature_index.astype(np.int64)
+            ).view(batch_size, -1),
+            "item_feature_index": torch.from_numpy(
+                item_feature_index.astype(np.int64)
+            ).view(batch_size, -1),
+            "item_episode": [list(seq) for seq in item_episode],
+            "reward_episode": [torch.FloatTensor(seq) for seq in reward_episode],
+        }
