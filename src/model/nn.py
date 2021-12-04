@@ -10,8 +10,8 @@ from ..dataset.custom_typings import PaddedNSortedUserHistoryBatch
 class StateTransitionNetwork(nn.Module):
     def __init__(
         self,
-        n_actions: int,
-        action_embedding_dim: int,
+        n_user_actions: int,
+        user_action_embedding_dim: int,
         hidden_size: int,
         padding_singal: int,
         num_layers: int = 1,
@@ -25,13 +25,13 @@ class StateTransitionNetwork(nn.Module):
     ):
         super(StateTransitionNetwork, self).__init__()
         self.padding_signal = padding_singal
-        self.item_embeddings = nn.Embedding(
-            num_embeddings=n_actions + 1,
-            embedding_dim=action_embedding_dim,
-            padding_idx=self.padding_signal,
+        self.user_action_embeddings = nn.Embedding(
+            num_embeddings=n_user_actions + 1,
+            embedding_dim=user_action_embedding_dim,
+            padding_idx=-1,
         )
         self.rnn = nn.GRU(
-            input_size=action_embedding_dim,
+            input_size=user_action_embedding_dim,
             hidden_size=hidden_size,
             num_layers=num_layers,
             dropout=dropout,
@@ -86,9 +86,10 @@ class StateTransitionNetwork(nn.Module):
         self, user_history: PaddedNSortedUserHistoryBatch
     ) -> torch.FloatTensor:
         padding_idx_replaced = user_history.data.masked_fill(
-            user_history.data == self.padding_signal, self.item_embeddings.padding_idx
+            user_history.data == self.padding_signal,
+            self.user_action_embeddings.padding_idx,
         )
-        user_history_embedded = self.item_embeddings(padding_idx_replaced)
+        user_history_embedded = self.user_action_embeddings(padding_idx_replaced)
         user_history_packedNembedded = pack_padded_sequence(
             input=user_history_embedded,
             lengths=user_history.lengths,
