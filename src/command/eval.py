@@ -1,15 +1,16 @@
-from typing import Dict
+from collections import defaultdict
+from typing import DefaultDict, Dict
 
 import torch
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from ..dataset.eval import UserItemEpisodeEvalLoader
 from ..model.agent import TopKOfflineREINFORCE
 
 
 def evaluate_agent(
     agent: TopKOfflineREINFORCE,
-    eval_loader: UserItemEpisodeEvalLoader,
+    eval_loader: DataLoader,
     debug: bool = True,
 ) -> Dict[str, float]:
     K = agent.K
@@ -22,28 +23,38 @@ def evaluate_agent(
     users_hit = set()
 
     agent.eval()
-    for (
-        user_id_list,
-        prev_item_sequence,
-        item_sequence_list,
-        relevance_sequence_list,
-    ) in tqdm(eval_loader, desc="eval"):
-        user_state = agent.state_network(prev_item_sequence)
+    for batch_dict in tqdm(eval_loader, desc="eval"):
+        state = agent.state_network(
+            user_history=batch_dict["user_history"],
+            user_feature_index=batch_dict.get("user_feature_index"),
+            item_feature_index=batch_dict.get("item_feature_index"),
+        )
 
-        recommended_items, _ = agent.recommend(user_state)
+        recommended_item_indices, _ = agent.recommend(state)
 
-        for user_id, actual_seq, relevance_seq, recommendations in zip(
-            user_id_list, item_sequence_list, relevance_sequence_list, recommended_items
+        for user_id, actual_seq, reward_seq, recommendations in zip(
+            batch_dict["user_id"],
+            batch_dict["item_index_episode"],
+            batch_dict["reward_episode"],
+            recommended_item_indices,
         ):
-            positive_seq = actual_seq[relevance_seq > 0]
-            intersection = set(positive_seq.tolist()) & set(recommendations.tolist())
-            if len(intersection) > 0:
+            actual_item_set = set(actual_seq.tolist())
+            recommendation_set = set(recommendations.tolist())
+
+            intersections = actual_item_set & recommendation_set
+            n_intersections = len(intersections)
+            if n_intersections > 0:
                 hit += 1
                 users_hit.add(user_id)
 
-            precision = len(intersection) / len(recommendations)
-            recall = len(intersection) / len(positive_seq)
-            ndcg = compute_ndcg(recommendations, actual_seq, relevance_seq)
+            precision = n_intersections / len(recommendation_set)
+            recall = n_intersections / len(actual_item_set)
+            ndcg = compute_ndcg(
+                recommendations=recommendations,
+                relevance_book=build_relevance_book(
+                    item_sequence=actual_seq, reward_sequence=reward_seq
+                ),
+            )
 
             precision_log.append(precision)
             recall_log.append(recall)
@@ -57,7 +68,7 @@ def evaluate_agent(
                 print("=" * 20)
 
         cnt += eval_loader.batch_size
-        users_total |= set(user_id_list)
+        users_total |= set(user_id)
 
     return {
         f"Precision at {K}": sum(precision_log) / cnt,
@@ -69,26 +80,33 @@ def evaluate_agent(
 
 
 def compute_ndcg(
-    recommendations: torch.LongTensor,
-    actual_sequence: torch.LongTensor,
-    relevance_sequence: torch.FloatTensor,
+    recommendations: torch.LongTensor, relevance_book: DefaultDict[int, float]
 ) -> float:
-    positive_relevance = relevance_sequence[relevance_sequence > 0]
-    sorted_relevance, _ = positive_relevance.sort(descending=True)
+    sorted_relevance = torch.FloatTensor(sorted(relevance_book.values(), reverse=True))
 
-    n_positive_items = len(positive_relevance)
-    _coefs = torch.ones(n_positive_items) / torch.arange(2, n_positive_items + 2).log2()
+    n_items = len(sorted_relevance)
+    _coefs = torch.ones(n_items) / torch.arange(2, n_items + 2).log2()
     idcg = (_coefs @ sorted_relevance).item()
 
-    relevance_book = {
-        actual_sequence[i].item(): relevance_sequence[i].item()
-        for i in range(len(actual_sequence))
-    }
     recommended_relevance = torch.FloatTensor(
-        [relevance_book.get(item_idx.item()) or 0.0 for item_idx in recommendations]
+        [relevance_book[item_idx.item()] for item_idx in recommendations]
     )
     K = len(recommendations)
     _coefs = torch.ones(K) / torch.arange(2, K + 2).log2()
     dcg = (_coefs @ recommended_relevance).item()
 
     return dcg / idcg if idcg > 0 else 0.0
+
+
+def build_relevance_book(
+    item_sequence: torch.LongTensor, reward_sequence: torch.FloatTensor
+) -> DefaultDict[int, float]:
+    assert len(item_sequence) == len(
+        reward_sequence
+    ), "Item and reward sequence length should match."
+
+    relevance_book = defaultdict(float)
+    for item_indexed, reward in torch.cat((item_sequence, reward_sequence), dim=1):
+        relevance_book[item_indexed] += reward
+
+    return relevance_book
