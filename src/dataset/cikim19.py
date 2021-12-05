@@ -1,4 +1,5 @@
 import os
+from itertools import chain
 from random import randint
 from typing import Any, Dict, List, Sequence, Tuple, Union
 
@@ -11,6 +12,7 @@ from pyspark.sql.functions import (
     col,
     collect_list,
     count,
+    create_map,
     explode,
     lit,
     monotonically_increasing_id,
@@ -87,8 +89,6 @@ class CIKIM19Dataset(Dataset):
         train: bool,
         split_ratio: float,
         train_item_index_map: DataFrame = None,
-        train_user_feature_index_map: DataFrame = None,
-        train_item_feature_index_map: DataFrame = None,
         sequence_length_cutoffs: Tuple[Tuple[int, int], Tuple[int, int]] = (
             (6, 50),
             (51, 200),
@@ -111,42 +111,69 @@ class CIKIM19Dataset(Dataset):
 
         self.discount_factor = discount_factor
 
-        self.logs: DataFrame = self._build_event_logs()
-
-        if self.train is True:
-            self.item_index_map = self._build_item_index_map()
-            self.user_feature_index_map = self._build_user_feature_index_map()
-            self.item_feature_index_map = self._build_item_feature_index_map()
-        else:
-            assert (
-                train_item_index_map
-                and train_user_feature_index_map
-                and train_item_feature_index_map
-            ), "Index mappings from train sequence should be provided for evaluation dataset."
-            self.item_index_map = train_item_index_map
-            self.user_feature_index_map = train_user_feature_index_map
-            self.item_feature_index_map = train_item_feature_index_map
-        self.user_action_index_map = self._build_user_action_index_map(
-            self.item_index_map
+        self.users_df = (
+            self.spark.read.schema(self.users_fetching_schema)
+            .csv(os.path.join(self.data_path, "user.csv"))
+            .withColumn(
+                "age",
+                when(col("age") < 30, lit(0))
+                .when(col("age") < 50, lit(1))
+                .when(col("age") < 70, lit(2))
+                .otherwise(lit(3)),
+            )  # Age binning
         )
-
-        self.data: np.ndarray = self._build_episodic_data()
-
-    def _build_event_logs(self) -> DataFrame:
-        users_df = self.spark.read.schema(self.users_fetching_schema).csv(
-            os.path.join(self.data_path, "user.csv")
-        )
-        items_df = self.spark.read.schema(self.items_fetching_schema).csv(
+        self.items_df = self.spark.read.schema(self.items_fetching_schema).csv(
             os.path.join(self.data_path, "item.csv")
         )
-        events_df = self.spark.read.schema(self.events_fetching_schema).csv(
+        self.events_df = self.spark.read.schema(self.events_fetching_schema).csv(
             os.path.join(self.data_path, "user_behavior.csv")
         )
 
-        # 1. Split data
+        self.logs = self._build_event_logs()
+
+        if self.train is True:
+            self.item_index_map = self._build_item_index_map()
+        else:
+            assert (
+                train_item_index_map
+            ), "Item-index mapping from train sequence should be provided for evaluation dataset."
+            self.item_index_map = train_item_index_map
+        self.user_action_index_map = self._build_user_action_index_map(
+            self.item_index_map
+        )
+        self.user_feature_index_map = self._build_user_feature_index_map()
+        self.item_feature_index_map = self._build_item_feature_index_map()
+
+        self.data = self._build_episodic_data()
+
+    def _build_event_logs(self) -> DataFrame:
+        # 1. Merge & Collect only events with items in specific category
+        if self.category_id:
+            preprocessed = (
+                self.events_df.join(self.users_df, on=["user"], how="left")
+                .join(
+                    self.items_df.withColumn(
+                        "in_category", col("category") == self.category_id
+                    ),
+                    on=["item"],
+                    how="left",
+                )
+                .filter("in_category")
+                .drop("in_category")
+            )
+        else:
+            preprocessed = self.events_df.join(
+                self.users_df, on=["user"], how="left"
+            ).join(
+                self.items_df,
+                on=["item"],
+                how="left",
+            )
+
+        # 2. Split data
         if self.train is True:
             preprocessed = (
-                events_df.withColumn(
+                preprocessed.withColumn(
                     "percent_rank", percent_rank().over(W.partitionBy().orderBy("time"))
                 )
                 .filter(col("percent_rank") <= self.split_ratio)
@@ -154,106 +181,74 @@ class CIKIM19Dataset(Dataset):
             )
         else:
             preprocessed = (
-                events_df.withColumn(
+                preprocessed.withColumn(
                     "percent_rank", percent_rank().over(W.partitionBy().orderBy("time"))
                 )
                 .filter(col("percent_rank") > 1.0 - self.split_ratio)
                 .drop("percent_rank")
             )
 
-        # 2. Alleviate user's sequence length imbalance
-        user_seq_len = preprocessed.groupBy("user").agg(
-            count("*").alias("sequence_length")
-        )
-        users_w_short_seq = user_seq_len.filter(
-            col("sequence_length").between(*self.cutoffs[0])
-        ).drop("sequence_length")
-        users_w_long_seq = user_seq_len.filter(
-            col("sequence_length").between(*self.cutoffs[-1])
-        ).drop("sequence_length")
-        n_short = users_w_short_seq.count()
-        n_long = users_w_long_seq.count()
+        # 3. Alleviate user's sequence length imbalance (only when training)
+        if self.train:
+            user_seq_len = preprocessed.groupBy("user").agg(
+                count("*").alias("sequence_length")
+            )
+            users_w_short_seq = user_seq_len.filter(
+                col("sequence_length").between(*self.cutoffs[0])
+            ).select("user")
+            users_w_long_seq = user_seq_len.filter(
+                col("sequence_length").between(*self.cutoffs[-1])
+            ).select("user")
+            n_short = users_w_short_seq.count()
+            n_long = users_w_long_seq.count()
 
-        if n_short < self.n_samples[0] and n_long < self.n_samples[-1]:
-            short_long_ratio = self.n_samples[0] / self.n_samples[-1]
-            if n_short / n_long - 1e-2 < short_long_ratio < n_short / n_long + 1e-2:
+            if n_short < self.n_samples[0] and n_long < self.n_samples[-1]:
+                short_long_ratio = self.n_samples[0] / self.n_samples[-1]
+                if n_short / n_long - 1e-2 < short_long_ratio < n_short / n_long + 1e-2:
+                    users_w_short_seq_sampled = users_w_short_seq
+                    users_w_long_seq_sampled = users_w_long_seq
+                elif short_long_ratio > n_short / n_long:
+                    users_w_short_seq_sampled = users_w_short_seq
+                    _ratio_long = n_short / short_long_ratio / n_long
+                    users_w_long_seq_sampled = users_w_long_seq.sample(
+                        _ratio_long, self.sample_seed
+                    )
+                elif short_long_ratio < n_short / n_long:
+                    _ratio_short = n_long * short_long_ratio / n_short
+                    users_w_short_seq_sampled = users_w_short_seq.sample(
+                        _ratio_short, self.sample_seed
+                    )
+                    users_w_long_seq_sampled = users_w_long_seq
+            elif n_short < self.n_samples[0]:
                 users_w_short_seq_sampled = users_w_short_seq
-                users_w_long_seq_sampled = users_w_long_seq
-            elif short_long_ratio > n_short / n_long:
-                users_w_short_seq_sampled = users_w_short_seq
-                _ratio_long = n_short / short_long_ratio / n_long
+                _ratio_long = n_short * self.n_samples[-1] / self.n_samples[0] / n_long
                 users_w_long_seq_sampled = users_w_long_seq.sample(
                     _ratio_long, self.sample_seed
                 )
-            elif short_long_ratio < n_short / n_long:
-                _ratio_short = n_long * short_long_ratio / n_short
+            elif n_long < self.n_samples[-1]:
+                _ratio_short = n_long * self.n_samples[0] / self.n_samples[-1] / n_short
                 users_w_short_seq_sampled = users_w_short_seq.sample(
                     _ratio_short, self.sample_seed
                 )
                 users_w_long_seq_sampled = users_w_long_seq
-        elif n_short < self.n_samples[0]:
-            users_w_short_seq_sampled = users_w_short_seq
-            _ratio_long = n_short * self.n_samples[-1] / self.n_samples[0] / n_long
-            users_w_long_seq_sampled = users_w_long_seq.sample(
-                _ratio_long, self.sample_seed
-            )
-        elif n_long < self.n_samples[-1]:
-            _ratio_short = n_long * self.n_samples[0] / self.n_samples[-1] / n_short
-            users_w_short_seq_sampled = users_w_short_seq.sample(
-                _ratio_short, self.sample_seed
-            )
-            users_w_long_seq_sampled = users_w_long_seq
-        else:
-            _ratio_short = self.n_samples[0] / n_short
-            users_w_short_seq_sampled = users_w_short_seq.sample(
-                _ratio_short, self.sample_seed
-            )
-            _ratio_long = self.n_samples[-1] / n_long
-            users_w_long_seq_sampled = users_w_long_seq.sample(
-                _ratio_long, self.sample_seed
-            )
-
-        users_sampled = users_w_short_seq_sampled.union(users_w_long_seq_sampled)
-        preprocessed = preprocessed.join(users_sampled, ["user"], "inner")
-
-        # 3. Assign reward values
-        preprocessed = preprocessed.withColumn(
-            "reward",
-            when(col("event") == "pv", lit(1.0))
-            .when(col("event") == "fav", lit(2.0))
-            .when(col("event") == "cart", lit(3.0))
-            .when(col("event") == "buy", lit(5.0))
-            .otherwise(lit(None)),
-        ).filter(col("reward").isNotNull())
-
-        # 4. Merge & Collect only events with items in specific category
-        if self.category_id:
-            preprocessed = (
-                preprocessed.join(users_df, on=["user"], how="left")
-                .join(
-                    items_df.withColumn(
-                        "in_category", col("category") == self.category_id
-                    ),
-                    on=["item"],
-                    how="left",
+            else:
+                _ratio_short = self.n_samples[0] / n_short
+                users_w_short_seq_sampled = users_w_short_seq.sample(
+                    _ratio_short, self.sample_seed
                 )
-                .filter("in_category")
-            )
-        else:
-            preprocessed = preprocessed.join(users_df, on=["user"], how="left").join(
-                items_df,
-                on=["item"],
-                how="left",
-            )
+                _ratio_long = self.n_samples[-1] / n_long
+                users_w_long_seq_sampled = users_w_long_seq.sample(
+                    _ratio_long, self.sample_seed
+                )
 
-        # 5. Age binning
+            users_sampled = users_w_short_seq_sampled.union(users_w_long_seq_sampled)
+            preprocessed = preprocessed.join(users_sampled, ["user"])
+
+        # 4. Assign reward values
+        spark_reward_map = create_map([lit(x) for x in chain(*self.reward_map.items())])
         preprocessed = preprocessed.withColumn(
-            "age",
-            when(col("age") < 30, lit(0))
-            .when(col("age") < 50, lit(1))
-            .when(col("age") < 70, lit(2))
-            .otherwise(lit(3)),
-        )
+            "reward", spark_reward_map.getItem(col("event"))
+        ).filter(col("reward").isNotNull())
 
         return preprocessed.select(
             "time",
@@ -282,7 +277,7 @@ class CIKIM19Dataset(Dataset):
 
     def _build_user_feature_index_map(self) -> DataFrame:
         return (
-            self.logs.select(*self.user_feature_cols)
+            self.users_df.select(*self.user_feature_cols)
             .distinct()
             .coalesce(1)
             .orderBy(*self.user_feature_cols)
@@ -292,7 +287,7 @@ class CIKIM19Dataset(Dataset):
     def _build_item_feature_index_map(self) -> DataFrame:
 
         return (
-            self.logs.select(*self.item_feature_cols)
+            self.items_df.select(*self.item_feature_cols)
             .distinct()
             .coalesce(1)
             .orderBy(*self.item_feature_cols)
@@ -341,14 +336,18 @@ class CIKIM19Dataset(Dataset):
                         .rowsBetween(W.currentRow, W.unboundedFollowing)
                     ),
                 )
-                .withColumn("discount_factor", lit(self.discount_factor))
                 .withColumn(
-                    "return", self._compute_return("reward_episode", "discount_factor")
+                    "return",
+                    self._compute_return("reward_episode", lit(self.discount_factor)),
                 )
                 .select(*self.train_cols)
             )
+
             return np.array(
-                [(row[col] for col in self.train_cols) for row in episodes_df.collect()]
+                [
+                    tuple(row[col] for col in self.train_cols)
+                    for row in episodes_df.collect()
+                ]
             )
         else:
             episodes_df = (
@@ -371,7 +370,10 @@ class CIKIM19Dataset(Dataset):
                 .select(*self.eval_cols)
             )
             return np.array(
-                [(row[col] for col in self.eval_cols) for row in episodes_df.collect()]
+                [
+                    tuple(row[col] for col in self.eval_cols)
+                    for row in episodes_df.collect()
+                ]
             )
 
     def __len__(self) -> int:
