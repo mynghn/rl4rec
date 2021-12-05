@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 from torch import LongTensor, device
-from typing_extensions import DataClass
 
 
 @dataclass
