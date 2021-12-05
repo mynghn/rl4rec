@@ -35,11 +35,27 @@ def train_agent(
                 )
 
             # 1. Build State
-            state = agent.state_network(
-                user_history=batch_dict["user_history"],
-                user_feature_index=batch_dict.get("user_feature_index"),
-                item_feature_index=batch_dict.get("item_feature_index"),
-            )
+            if (
+                agent.state_network.user_feature_enabled
+                and agent.state_network.item_feature_enabled
+            ):
+                state = agent.state_network(
+                    user_history=batch_dict["user_history"],
+                    user_feature_index=batch_dict.get("user_feature_index"),
+                    item_feature_index=batch_dict.get("item_feature_index"),
+                )
+            elif agent.state_network.user_feature_enabled:
+                state = agent.state_network(
+                    user_history=batch_dict["user_history"],
+                    user_feature_index=batch_dict.get("user_feature_index"),
+                )
+            elif agent.state_network.item_feature_enabled:
+                state = agent.state_network(
+                    user_history=batch_dict["user_history"],
+                    item_feature_index=batch_dict.get("item_feature_index"),
+                )
+            else:
+                state = agent.state_network(user_history=batch_dict["user_history"])
 
             # 2. Compute Policy Losses
             action_policy_loss = agent.action_policy_loss(
