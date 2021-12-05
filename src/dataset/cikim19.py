@@ -93,7 +93,7 @@ class CIKIM19Dataset(Dataset):
             (6, 50),
             (51, 200),
         ),
-        n_samples: Tuple(int, int) = (20000, 60000),
+        n_samples: Tuple[int, int] = (20000, 60000),
         category_id: str = None,
         discount_factor: float = 1e-2,
     ):
