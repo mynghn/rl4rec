@@ -61,7 +61,7 @@ class CIKIM19Dataset(Dataset):
 
     reward_map = {"pv": 1.0, "fav": 2.0, "cart": 3.0, "buy": 5.0}
 
-    user_feature_cols = ("sex", "age", "purpower")
+    user_feature_cols = ("sex", "age", "pur_power")
     item_feature_cols = ("category", "brand", "shop")
 
     train_cols = (
