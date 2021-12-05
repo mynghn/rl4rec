@@ -7,9 +7,11 @@ import torch
 from pyspark.sql import SparkSession
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.functions import (
+    array,
     col,
     collect_list,
     count,
+    explode,
     lit,
     monotonically_increasing_id,
     percent_rank,
@@ -57,8 +59,26 @@ class CIKIM19Dataset(Dataset):
         ]
     )
 
+    reward_map = {"pv": 1.0, "fav": 2.0, "cart": 3.0, "buy": 5.0}
+
     user_feature_cols = ("sex", "age", "purpower")
     item_feature_cols = ("category", "brand", "shop")
+
+    train_cols = (
+        "user_history",
+        "user_feature_index",
+        "item_feature_index",
+        "return",
+        "item_index",
+    )
+    eval_cols = (
+        "user",
+        "user_history",
+        "user_feature_index",
+        "item_feature_index",
+        "item_index_episode",
+        "reward_episode",
+    )
 
     def __init__(
         self,
@@ -66,6 +86,9 @@ class CIKIM19Dataset(Dataset):
         spark: SparkSession,
         train: bool,
         split_ratio: float,
+        train_item_index_map: DataFrame = None,
+        train_user_feature_index_map: DataFrame = None,
+        train_item_feature_index_map: DataFrame = None,
         sequence_length_cutoffs: Tuple[Tuple[int, int], Tuple[int, int]] = (
             (6, 50),
             (51, 200),
@@ -89,10 +112,23 @@ class CIKIM19Dataset(Dataset):
         self.discount_factor = discount_factor
 
         self.logs: DataFrame = self._build_event_logs()
-        self.user_action_index_map: DataFrame = self._build_user_action_index_map()
-        self.user_feature_index_map: DataFrame = self._build_user_feature_index_map()
-        self.item_feature_index_map: DataFrame = self._build_item_feature_index_map()
-        self.item_index_map: DataFrame = self._build_item_index_map()
+
+        if self.train is True:
+            self.item_index_map = self._build_item_index_map()
+            self.user_feature_index_map = self._build_user_feature_index_map()
+            self.item_feature_index_map = self._build_item_feature_index_map()
+        else:
+            assert (
+                train_item_index_map
+                and train_user_feature_index_map
+                and train_item_feature_index_map
+            ), "Index mappings from train sequence should be provided for evaluation dataset."
+            self.item_index_map = train_item_index_map
+            self.user_feature_index_map = train_user_feature_index_map
+            self.item_feature_index_map = train_item_feature_index_map
+        self.user_action_index_map = self._build_user_action_index_map(
+            self.item_index_map
+        )
 
         self.data: np.ndarray = self._build_episodic_data()
 
@@ -233,10 +269,12 @@ class CIKIM19Dataset(Dataset):
             "reward",
         )
 
-    def _build_user_action_index_map(self) -> DataFrame:
+    def _build_user_action_index_map(self, item_index_map: DataFrame) -> DataFrame:
         return (
-            self.logs.select("item", "event")
-            .distinct()
+            item_index_map.select("item")
+            .withColumn(
+                "event", explode(array([lit(act) for act in self.reward_map.keys()]))
+            )
             .coalesce(1)
             .orderBy("item", "event")
             .withColumn("user_action_index", monotonically_increasing_id())
@@ -278,7 +316,10 @@ class CIKIM19Dataset(Dataset):
 
     def _build_episodic_data(self) -> np.ndarray:
         logs_template = (
-            self.logs.join(self.user_action_index_map, on=["item", "event"], how="left")
+            self.logs.join(self.item_index_map, ["item"])
+            .join(self.user_action_index_map, ["item", "event"])
+            .join(self.user_feature_index_map, [*self.user_feature_cols])
+            .join(self.item_feature_index_map, [*self.item_feature_cols])
             .withColumn(
                 "user_history",
                 collect_list("user_action_index").over(
@@ -288,23 +329,9 @@ class CIKIM19Dataset(Dataset):
                 ),
             )
             .filter(size("user_history") > 0)
-            .join(
-                self.user_feature_index_map, on=[*self.user_feature_cols], how="inner"
-            )
-            .join(
-                self.item_feature_index_map, on=[*self.item_feature_cols], how="inner"
-            )
-            .join(self.item_index_map, on=["item"], how="inner")
         )
 
         if self.train is True:
-            cols = (
-                "user_history",
-                "user_feature_index",
-                "item_feature_index",
-                "return",
-                "item_index",
-            )
             episodes_df = (
                 logs_template.withColumn(
                     "reward_episode",
@@ -318,17 +345,12 @@ class CIKIM19Dataset(Dataset):
                 .withColumn(
                     "return", self._compute_return("reward_episode", "discount_factor")
                 )
-                .select(*cols)
+                .select(*self.train_cols)
+            )
+            return np.array(
+                [(row[col] for col in self.train_cols) for row in episodes_df.collect()]
             )
         else:
-            cols = (
-                "user",
-                "user_history",
-                "user_feature_index",
-                "item_feature_index",
-                "item_index_episode",
-                "reward_episode",
-            )
             episodes_df = (
                 logs_template.withColumn(
                     "item_index_episode",
@@ -346,10 +368,11 @@ class CIKIM19Dataset(Dataset):
                         .rowsBetween(W.currentRow, W.unboundedFollowing)
                     ),
                 )
-                .select(*cols)
+                .select(*self.eval_cols)
             )
-
-        return np.array([(row[col] for col in cols) for row in episodes_df.collect()])
+            return np.array(
+                [(row[col] for col in self.eval_cols) for row in episodes_df.collect()]
+            )
 
     def __len__(self) -> int:
         return len(self.data)
