@@ -9,5 +9,6 @@ class PaddedNSortedUserHistoryBatch:
     lengths: LongTensor
 
     def to(self, device: device):
-        self.data = self.data.to(device)
-        return self
+        return PaddedNSortedUserHistoryBatch(
+            data=self.data.to(device), legnths=self.lengths
+        )
