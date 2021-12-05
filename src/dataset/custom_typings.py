@@ -10,5 +10,5 @@ class PaddedNSortedUserHistoryBatch:
 
     def to(self, device: device):
         return PaddedNSortedUserHistoryBatch(
-            data=self.data.to(device), legnths=self.lengths
+            data=self.data.to(device), lengths=self.lengths
         )
