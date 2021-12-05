@@ -247,7 +247,7 @@ class CIKIM19Dataset(Dataset):
         # 4. Assign reward values
         spark_reward_map = create_map([lit(x) for x in chain(*self.reward_map.items())])
         preprocessed = preprocessed.withColumn(
-            "reward", spark_reward_map.getItem(col("event"))
+            "reward", spark_reward_map[col("event")]
         ).filter(col("reward").isNotNull())
 
         return preprocessed.select(
