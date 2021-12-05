@@ -58,7 +58,7 @@ class StateTransitionNetwork(nn.Module):
         user_feature_index: Optional[torch.LongTensor] = None,
         item_feature_index: Optional[torch.LongTensor] = None,
     ) -> torch.FloatTensor:
-        if user_feature_index and item_feature_index:
+        if user_feature_index is not None and item_feature_index is not None:
             assert (
                 self.user_feature_enabled and self.item_feature_enabled
             ), "User feature and item feature embeddings not activated."
@@ -67,13 +67,13 @@ class StateTransitionNetwork(nn.Module):
                 user_feature_index=user_feature_index,
                 item_feature_index=item_feature_index,
             )
-        elif user_feature_index:
+        elif user_feature_index is not None:
             assert self.user_feature_enabled, "User feature embeddings not activated."
             self.forward_w_user_feature(
                 user_history=user_history,
                 user_feature_index=user_feature_index,
             )
-        elif item_feature_index:
+        elif item_feature_index is not None:
             assert self.item_feature_enabled, "Item feature embeddings not activated."
             self.forward_w_item_feature(
                 user_history=user_history,
