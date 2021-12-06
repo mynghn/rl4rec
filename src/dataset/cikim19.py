@@ -464,7 +464,7 @@ class CIKIM19DataLoader(DataLoader):
             List[str],
             PaddedNSortedUserHistoryBatch,
             torch.LongTensor,
-            List[List[str]],
+            List[torch.LongTensor],
             List[torch.FloatTensor],
         ],
     ]:
@@ -493,6 +493,22 @@ class CIKIM19DataLoader(DataLoader):
             "item_feature_index": torch.from_numpy(
                 item_feature_index.astype(np.int64)
             ).view(batch_size, -1),
-            "item_index_episode": [list(seq) for seq in item_index_episode],
+            "item_index_episode": [torch.LongTensor(seq) for seq in item_index_episode],
             "reward_episode": [torch.FloatTensor(seq) for seq in reward_episode],
         }
+
+    def to(self, batch: Dict, device: torch.device) -> Dict:
+        if self.train:
+            return {k: v.to(device) for k, v in batch.items()}
+        else:
+            on_device = {
+                k: v.to(device) for k, v in batch.items() if not isinstance(v, list)
+            }
+            on_device["user_id"] = batch["user_id"]
+            on_device["item_index_episode"] = [
+                seq.to(device) for seq in batch["item_index_episode"]
+            ]
+            on_device["reward_episode"] = [
+                seq.to(device) for seq in batch["reward_episode"]
+            ]
+            return on_device
