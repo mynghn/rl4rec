@@ -464,8 +464,8 @@ class CIKIM19DataLoader(DataLoader):
             List[str],
             PaddedNSortedUserHistoryBatch,
             torch.LongTensor,
-            List[torch.LongTensor],
-            List[torch.FloatTensor],
+            List[List[int]],
+            List[List[float]],
         ],
     ]:
         batch_size = len(batch)
@@ -493,8 +493,8 @@ class CIKIM19DataLoader(DataLoader):
             "item_feature_index": torch.from_numpy(
                 item_feature_index.astype(np.int64)
             ).view(batch_size, -1),
-            "item_index_episode": [torch.LongTensor(seq) for seq in item_index_episode],
-            "reward_episode": [torch.FloatTensor(seq) for seq in reward_episode],
+            "item_index_episode": list(item_index_episode),
+            "reward_episode": list(reward_episode),
         }
 
     def to(self, batch: Dict, device: torch.device) -> Dict:
