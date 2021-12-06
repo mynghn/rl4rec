@@ -347,7 +347,8 @@ class CIKIM19Dataset(Dataset):
                 [
                     tuple(row[col] for col in self.train_cols)
                     for row in episodes_df.collect()
-                ]
+                ],
+                dtype=object,
             )
         else:
             episodes_df = (
@@ -373,7 +374,8 @@ class CIKIM19Dataset(Dataset):
                 [
                     tuple(row[col] for col in self.eval_cols)
                     for row in episodes_df.collect()
-                ]
+                ],
+                dtype=object,
             )
 
     def __len__(self) -> int:
