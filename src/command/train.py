@@ -2,15 +2,15 @@ import time
 from typing import List, Optional, Tuple
 
 import torch
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from ..dataset.cikim19 import CIKIM19DataLoader
 from ..model.agent import TopKOfflineREINFORCE
 
 
 def train_agent(
     agent: TopKOfflineREINFORCE,
-    train_loader: DataLoader,
+    train_loader: CIKIM19DataLoader,
     n_epochs: int,
     device: torch.device = torch.device("cpu"),
     debug: bool = True,
@@ -21,11 +21,10 @@ def train_agent(
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         print(f"\nEpoch {epoch} started at: {start_time}\n")
 
+        agent = agent.to(device)
         agent.train()
         for batch_dict in tqdm(train_loader, desc="train"):
-            if device.type != "cpu":
-                batch_dict = {k: v.to(device) for k, v in batch_dict.items()}
-                agent = agent.to(device)
+            batch_dict = train_loader.to(batch=batch_dict, device=device)
 
             # 1. Build State
             if (
