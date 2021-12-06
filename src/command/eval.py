@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import DefaultDict, Dict
+from typing import DefaultDict, Dict, List
 
 import torch
 from tqdm import tqdm
@@ -59,7 +59,7 @@ def evaluate_agent(
             batch_dict["reward_episode"],
             recommended_item_indices,
         ):
-            actual_item_set = set(actual_seq.tolist())
+            actual_item_set = set(actual_seq)
             recommendation_set = set(recommendations.tolist())
 
             intersections = actual_item_set & recommendation_set
@@ -120,16 +120,14 @@ def compute_ndcg(
 
 
 def build_relevance_book(
-    item_sequence: torch.LongTensor, reward_sequence: torch.FloatTensor
+    item_sequence: List[int], reward_sequence: List[float]
 ) -> DefaultDict[int, float]:
     assert len(item_sequence) == len(
         reward_sequence
     ), "Item and reward sequence length should match."
 
     relevance_book = defaultdict(float)
-    for item_indexed, reward in torch.cat(
-        (item_sequence.view(-1, 1), reward_sequence.view(-1, 1)), dim=1
-    ):
+    for item_indexed, reward in zip(item_sequence, reward_sequence):
         relevance_book[item_indexed] += reward
 
     return relevance_book
