@@ -149,3 +149,14 @@ class TopKOfflineREINFORCE(nn.Module):
         logits = torch.gather(input=action_policy_probs, dim=1, index=indexed_items)
 
         return list(indexed_items), list(logits)
+
+    def to(self, device: torch.device):
+        on_device = super().to(device)
+        on_device.action_policy.action_space = on_device.action_policy.action_space.to(
+            device
+        )
+        on_device.behavior_policy.action_space = (
+            on_device.behavior_policy.action_space.to(device)
+        )
+
+        return on_device

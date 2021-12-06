@@ -25,14 +25,7 @@ def train_agent(
         for batch_dict in tqdm(train_loader, desc="train"):
             if device.type != "cpu":
                 batch_dict = {k: v.to(device) for k, v in batch_dict.items()}
-
                 agent = agent.to(device)
-                agent.action_policy.action_space = agent.action_policy.action_space.to(
-                    device
-                )
-                agent.behavior_policy.action_space = (
-                    agent.behavior_policy.action_space.to(device)
-                )
 
             # 1. Build State
             if (
