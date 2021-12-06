@@ -2,15 +2,16 @@ from collections import defaultdict
 from typing import DefaultDict, Dict
 
 import torch
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from ..dataset.cikim19 import CIKIM19DataLoader
 from ..model.agent import TopKOfflineREINFORCE
 
 
 def evaluate_agent(
     agent: TopKOfflineREINFORCE,
-    eval_loader: DataLoader,
+    eval_loader: CIKIM19DataLoader,
+    device: torch.device = torch.device("cpu"),
     debug: bool = True,
 ) -> Dict[str, float]:
     K = agent.K
@@ -22,13 +23,33 @@ def evaluate_agent(
     users_total = set()
     users_hit = set()
 
+    agent = agent.to("cpu")
+
     agent.eval()
     for batch_dict in tqdm(eval_loader, desc="eval"):
-        state = agent.state_network(
-            user_history=batch_dict["user_history"],
-            user_feature_index=batch_dict.get("user_feature_index"),
-            item_feature_index=batch_dict.get("item_feature_index"),
-        )
+        batch_dict = eval_loader.to(batch=batch_dict, device=device)
+
+        if (
+            agent.state_network.user_feature_enabled
+            and agent.state_network.item_feature_enabled
+        ):
+            state = agent.state_network(
+                user_history=batch_dict["user_history"],
+                user_feature_index=batch_dict.get("user_feature_index"),
+                item_feature_index=batch_dict.get("item_feature_index"),
+            )
+        elif agent.state_network.user_feature_enabled:
+            state = agent.state_network(
+                user_history=batch_dict["user_history"],
+                user_feature_index=batch_dict.get("user_feature_index"),
+            )
+        elif agent.state_network.item_feature_enabled:
+            state = agent.state_network(
+                user_history=batch_dict["user_history"],
+                item_feature_index=batch_dict.get("item_feature_index"),
+            )
+        else:
+            state = agent.state_network(user_history=batch_dict["user_history"])
 
         recommended_item_indices, _ = agent.recommend(state)
 
@@ -106,7 +127,9 @@ def build_relevance_book(
     ), "Item and reward sequence length should match."
 
     relevance_book = defaultdict(float)
-    for item_indexed, reward in torch.cat((item_sequence, reward_sequence), dim=1):
+    for item_indexed, reward in torch.cat(
+        (item_sequence.view(-1, 1), reward_sequence.view(-1, 1)), dim=1
+    ):
         relevance_book[item_indexed] += reward
 
     return relevance_book
