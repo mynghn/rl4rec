@@ -28,8 +28,6 @@ class CIKIM19Dataset(Dataset):
     train_cols = ["user_history", "return", "item_index"]
     eval_cols = ["user", "user_history", "item_index_episode", "reward_episode"]
 
-    max_records = 5000000
-
     def __init__(
         self,
         spark: SparkSession,
@@ -47,6 +45,7 @@ class CIKIM19Dataset(Dataset):
         category_id: str = None,
         user_feature: bool = False,
         item_feature: bool = False,
+        max_records: int = None,
     ):
         self.data_path = data_path
 
@@ -62,6 +61,8 @@ class CIKIM19Dataset(Dataset):
         self.item_feature_enbled = item_feature
 
         self.discount_factor = discount_factor
+
+        self.max_records = max_records
 
         # 0. Fetch Raw data
         self.users_df: pd.DataFrame = pd.read_csv(
@@ -142,8 +143,11 @@ class CIKIM19Dataset(Dataset):
         preprocessed = (
             preprocessed.drop_duplicates().sort_values(by="time").reset_index(drop=True)
         )
-        n_records = min(self.max_records, preprocessed.shape[0])
-        preprocessed = preprocessed[preprocessed.index < n_records]
+        if self.max_records:
+            n_records = min(self.max_records, preprocessed.shape[0])
+            preprocessed = preprocessed[preprocessed.index < n_records]
+        else:
+            n_records = preprocessed.shape[0]
         if self.train is True:
             preprocessed = preprocessed[
                 preprocessed.index < ceil(n_records * self.split_ratio)
