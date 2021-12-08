@@ -41,6 +41,8 @@ class CIKIM19Dataset(Dataset):
         ),
         n_samples: Tuple[int, int] = (20000, 60000),
         discount_factor: float = 1e-2,
+        events_data_splitted: bool = False,
+        suffix_list: Sequence[str] = None,
         category_id: str = None,
         user_feature: bool = False,
         item_feature: bool = False,
@@ -75,12 +77,27 @@ class CIKIM19Dataset(Dataset):
             names=self.items_fetching_dtypes.keys(),
             dtype=self.items_fetching_dtypes,
         )
-        self.events_df: pd.DataFrame = pd.read_csv(
-            os.path.join(self.data_path, "user_behavior.csv"),
-            header=None,
-            names=self.events_fetching_dtypes.keys(),
-            dtype=self.events_fetching_dtypes,
-        )
+        if events_data_splitted is False:
+            self.events_df: pd.DataFrame = pd.read_csv(
+                os.path.join(self.data_path, "user_behavior.csv"),
+                header=None,
+                names=self.events_fetching_dtypes.keys(),
+                dtype=self.events_fetching_dtypes,
+            )
+        else:
+            assert suffix_list, "File suffix list should be provided."
+            df_list = []
+            for suffix in suffix_list:
+                fname = f"user_behavior_{suffix}"
+                df_list.append(
+                    pd.read_csv(
+                        os.path.join(self.data_path, fname),
+                        header=None,
+                        names=self.events_fetching_dtypes.keys(),
+                        dtype=self.events_fetching_dtypes,
+                    )
+                )
+            self.events_df = pd.concat(df_list)
 
         # 1. Build event logs
         self.logs = self._build_event_logs()
