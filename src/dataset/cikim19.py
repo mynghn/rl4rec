@@ -28,6 +28,8 @@ class CIKIM19Dataset(Dataset):
     train_cols = ["user_history", "return", "item_index"]
     eval_cols = ["user", "user_history", "item_index_episode", "reward_episode"]
 
+    max_records = 5000000
+
     def __init__(
         self,
         spark: SparkSession,
@@ -148,7 +150,8 @@ class CIKIM19Dataset(Dataset):
         preprocessed = (
             preprocessed.drop_duplicates().sort_values(by="time").reset_index(drop=True)
         )
-        n_records = preprocessed.shape[0]
+        n_records = min(self.max_records, preprocessed.shape[0])
+        preprocessed = preprocessed[preprocessed.index < n_records]
         if self.train is True:
             preprocessed = preprocessed[
                 preprocessed.index < ceil(n_records * self.split_ratio)
