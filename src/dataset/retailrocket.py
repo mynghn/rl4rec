@@ -32,7 +32,7 @@ class RetailrocketDataset(Dataset):
     reward_map = {"view": 1.0, "addtocart": 2.0, "transaction": 4.0}
 
     train_cols = ["user_history", "return", "item_index"]
-    eval_cols = ["user", "user_history", "item_index_episode", "reward_episode"]
+    eval_cols = ["visitorid", "user_history", "item_index_episode", "reward_episode"]
 
     def __init__(
         self,
@@ -242,7 +242,7 @@ class RetailrocketDataset(Dataset):
         with_user_history = sdf.withColumn(
             "user_history",
             collect_list("user_action_index").over(
-                W.partitionBy("user")
+                W.partitionBy("visitorid")
                 .orderBy("time")
                 .rowsBetween(W.unboundedPreceding, -1)
             ),
@@ -253,7 +253,7 @@ class RetailrocketDataset(Dataset):
                 with_user_history.withColumn(
                     "reward_episode",
                     collect_list("reward").over(
-                        W.partitionBy("user")
+                        W.partitionBy("visitorid")
                         .orderBy("time")
                         .rowsBetween(W.currentRow, W.unboundedFollowing)
                     ),
@@ -269,7 +269,7 @@ class RetailrocketDataset(Dataset):
                 with_user_history.withColumn(
                     "item_index_episode",
                     collect_list("item_index").over(
-                        W.partitionBy("user")
+                        W.partitionBy("visitorid")
                         .orderBy("time")
                         .rowsBetween(W.currentRow, W.unboundedFollowing)
                     ),
@@ -277,7 +277,7 @@ class RetailrocketDataset(Dataset):
                 .withColumn(
                     "reward_episode",
                     collect_list("reward").over(
-                        W.partitionBy("user")
+                        W.partitionBy("visitorid")
                         .orderBy("time")
                         .rowsBetween(W.currentRow, W.unboundedFollowing)
                     ),
