@@ -91,7 +91,7 @@ class RetailrocketDataset(Dataset):
             header=0,
             dtype=self.events_fetching_dtypes,
         )
-        df.drop("trasactionid", axis=1, inplace=True)
+        df.drop("transactionid", axis=1, inplace=True)
         return df
 
     def _get_item_category_df(self) -> pd.DataFrame:
