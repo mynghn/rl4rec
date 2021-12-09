@@ -41,7 +41,7 @@ class SoftmaxStochasticPolicy(nn.Module):
         if self.adaptive_softmax is True:
             item_embedded = self.item_embeddings(item_index).view(batch_size, -1)
             log_item_prob = self.softmax(
-                torch.cat((state, item_embedded), dim=1), item_index
+                torch.cat((state, item_embedded), dim=1), item_index.squeeze()
             ).output
         else:
             assert state.size(-1) == self.item_embeddings.weight.size(
