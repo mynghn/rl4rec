@@ -37,8 +37,9 @@ class SoftmaxStochasticPolicy(nn.Module):
     def forward(
         self, state: torch.FloatTensor, item_index: torch.LongTensor
     ) -> torch.FloatTensor:
+        batch_size = item_index.size(0)
         if self.adaptive_softmax is True:
-            item_embedded = self.item_embeddings(item_index)
+            item_embedded = self.item_embeddings(item_index).view(batch_size, -1)
             log_item_prob = self.softmax(
                 torch.cat((state, item_embedded), dim=1), item_index
             ).output
@@ -51,7 +52,6 @@ class SoftmaxStochasticPolicy(nn.Module):
                 [torch.sum(s * items_embedded / self.T, dim=1) for s in state]
             )
             item_probs = self.softmax(logits)
-            batch_size = item_index.size(0)
             item_prob = torch.cat(
                 [
                     item_probs[batch_idx][item_index[batch_idx]]
