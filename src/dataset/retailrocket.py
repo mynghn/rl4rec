@@ -205,7 +205,7 @@ class RetailrocketDataset(Dataset):
         user_action_index_map = item_index_map.copy()
         user_action_index_map.drop("item_index", axis=1, inplace=True)
         user_action_index_map["event"] = user_action_index_map.itemid.map(
-            lambda _: self.reward_map.keys()
+            lambda _: list(self.reward_map.keys())
         )
         user_action_index_map = user_action_index_map.explode(column="event")
         user_action_index_map.sort_values(by=["itemid", "event"], inplace=True)
