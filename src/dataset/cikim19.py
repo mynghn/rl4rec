@@ -292,7 +292,6 @@ class CIKIM19Dataset(Dataset):
             )
 
         spark.conf.set("spark.sql.execution.arrow.enabled", "true")
-        spark.conf.set("spark.driver.memory", "32g")
         sdf = spark.createDataFrame(index_merged)
 
         with_user_history = sdf.withColumn(
