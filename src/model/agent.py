@@ -75,10 +75,13 @@ class TopKOfflineREINFORCE(nn.Module):
     def behavior_policy_loss(
         self, state: torch.FloatTensor, item_index: torch.LongTensor
     ) -> torch.FloatTensor:
+        batch_size = item_index.size(0)
         if self.behavior_policy.adaptive_softmax is True:
-            item_embedded = self.behavior_policy.item_embeddings(item_index)
+            item_embedded = self.behavior_policy.item_embeddings(item_index).view(
+                batch_size, -1
+            )
             out = self.behavior_policy.softmax(
-                torch.cat((state.detach(), item_embedded), dim=1), item_index
+                torch.cat((state.detach(), item_embedded), dim=1), item_index.squeeze()
             )
             return out.loss
         else:
@@ -98,7 +101,7 @@ class TopKOfflineREINFORCE(nn.Module):
             actual_action_probs = log_behavior_policy_probs.new_zeros(
                 log_behavior_policy_probs.size()
             )
-            for batch_idx in range(item_index.size(0)):
+            for batch_idx in range(batch_size):
                 actual_action_probs[batch_idx][item_index[batch_idx]] = 1.0
             return self.kl_div_loss(log_behavior_policy_probs, actual_action_probs)
 
