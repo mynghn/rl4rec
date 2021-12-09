@@ -10,6 +10,7 @@ class SoftmaxStochasticPolicy(nn.Module):
         n_items: int,
         item_embedding_dim: int,
         adaptive_softmax: bool = False,
+        state_vector_dim: int = None,
         softmax_cutoffs: Sequence = None,
         softmax_temperature: float = 1.0,
     ):
@@ -22,8 +23,9 @@ class SoftmaxStochasticPolicy(nn.Module):
 
         self.adaptive_softmax = adaptive_softmax
         if self.adaptive_softmax is True:
+            assert state_vector_dim, "State vector dimension should be provided."
             self.softmax = nn.AdaptiveLogSoftmaxWithLoss(
-                in_features=item_embedding_dim,
+                in_features=state_vector_dim + item_embedding_dim,
                 n_classes=n_items,
                 cutoffs=softmax_cutoffs,
             )
@@ -37,7 +39,9 @@ class SoftmaxStochasticPolicy(nn.Module):
     ) -> torch.FloatTensor:
         if self.adaptive_softmax is True:
             item_embedded = self.item_embeddings(item_index)
-            log_item_prob = self.softmax(item_embedded, item_index).output
+            log_item_prob = self.softmax(
+                torch.cat((state, item_embedded), dim=1), item_index
+            ).output
         else:
             assert state.size(-1) == self.item_embeddings.weight.size(
                 -1
