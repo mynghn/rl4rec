@@ -42,6 +42,8 @@ class CIKIM19Dataset(Dataset):
         n_samples: Tuple[int, int] = (20000, 60000),
         discount_factor: float = 1e-2,
         events_truncated: bool = True,
+        events_splitted: bool = False,
+        events_suffix_list: List[str] = None,
         category_id: str = None,
         user_feature: bool = False,
         item_feature: bool = False,
@@ -86,6 +88,19 @@ class CIKIM19Dataset(Dataset):
                 names=self.events_fetching_dtypes.keys(),
                 dtype=self.events_fetching_dtypes,
             )
+        elif events_splitted is True:
+            assert events_suffix_list, "File suffix list should be provided"
+            df_list = []
+            for suffix in events_suffix_list:
+                df_list.append(
+                    pd.read_csv(
+                        os.path.join(self.data_path, f"user_behavior_{suffix}"),
+                        header=None,
+                        names=self.events_fetching_dtypes.keys(),
+                        dtype=self.events_fetching_dtypes,
+                    )
+                )
+            self.events_df: pd.DataFrame = pd.concat(df_list)
         else:
             self.events_df: pd.DataFrame = pd.read_csv(
                 os.path.join(self.data_path, "user_behavior.csv"),
