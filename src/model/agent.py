@@ -26,8 +26,6 @@ class TopKOfflineREINFORCE(nn.Module):
         self.action_policy = action_policy
         self.behavior_policy = behavior_policy
 
-        self.num_actions = self.action_policy.action_space.size(0)
-
         self.K = K
 
         self.weight_cap = weight_cap
