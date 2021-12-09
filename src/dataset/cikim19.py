@@ -286,7 +286,7 @@ class CIKIM19Dataset(Dataset):
             index_merged = index_merged.merge(
                 self.user_feature_index_map, on=self.user_feature_cols, how="inner"
             )
-        if self.item_feature_enbled:
+        if self.item_feature_enabled:
             index_merged = index_merged.merge(
                 self.item_feature_index_map, on=self.item_feature_cols, how="inner"
             )
