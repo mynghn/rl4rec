@@ -192,7 +192,7 @@ class RetailrocketDataset(Dataset):
             users_sampled = np.concatenate(
                 [users_w_short_seq_sampled, users_w_long_seq_sampled]
             )
-            preprocessed = preprocessed[preprocessed.user.isin(users_sampled)]
+            preprocessed = preprocessed[preprocessed.visitorid.isin(users_sampled)]
 
         # 4. Assign reward values
         preprocessed["reward"] = preprocessed.event.map(self.reward_map)
