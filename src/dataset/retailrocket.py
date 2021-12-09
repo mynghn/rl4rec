@@ -243,7 +243,7 @@ class RetailrocketDataset(Dataset):
             "user_history",
             collect_list("user_action_index").over(
                 W.partitionBy("visitorid")
-                .orderBy("time")
+                .orderBy("timestamp")
                 .rowsBetween(W.unboundedPreceding, -1)
             ),
         ).filter(size("user_history") > 0)
@@ -254,7 +254,7 @@ class RetailrocketDataset(Dataset):
                     "reward_episode",
                     collect_list("reward").over(
                         W.partitionBy("visitorid")
-                        .orderBy("time")
+                        .orderBy("timestamp")
                         .rowsBetween(W.currentRow, W.unboundedFollowing)
                     ),
                 )
@@ -270,7 +270,7 @@ class RetailrocketDataset(Dataset):
                     "item_index_episode",
                     collect_list("item_index").over(
                         W.partitionBy("visitorid")
-                        .orderBy("time")
+                        .orderBy("timestamp")
                         .rowsBetween(W.currentRow, W.unboundedFollowing)
                     ),
                 )
@@ -278,7 +278,7 @@ class RetailrocketDataset(Dataset):
                     "reward_episode",
                     collect_list("reward").over(
                         W.partitionBy("visitorid")
-                        .orderBy("time")
+                        .orderBy("timestamp")
                         .rowsBetween(W.currentRow, W.unboundedFollowing)
                     ),
                 )
