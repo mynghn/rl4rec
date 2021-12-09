@@ -58,7 +58,7 @@ class CIKIM19Dataset(Dataset):
 
         self.category_id = category_id
         self.user_feature_enabled = user_feature
-        self.item_feature_enbled = item_feature
+        self.item_feature_enabled = item_feature
 
         self.discount_factor = discount_factor
 
