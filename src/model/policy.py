@@ -15,8 +15,7 @@ class SoftmaxStochasticPolicy(nn.Module):
     ):
         super(SoftmaxStochasticPolicy, self).__init__()
 
-        self.action_space = torch.arange(n_items)
-        self.action_embeddings = nn.Embedding(
+        self.item_embeddings = nn.Embedding(
             num_embeddings=n_items,
             embedding_dim=item_embedding_dim,
         )
@@ -24,27 +23,37 @@ class SoftmaxStochasticPolicy(nn.Module):
         self.adaptive_softmax = adaptive_softmax
         if self.adaptive_softmax is True:
             self.softmax = nn.AdaptiveLogSoftmaxWithLoss(
-                in_features=1,
+                in_features=item_embedding_dim,
                 n_classes=n_items,
                 cutoffs=softmax_cutoffs,
             )
         else:
             self.softmax = nn.Softmax(dim=1)
-        self.T = softmax_temperature
+            self.item_space = torch.arange(n_items)
+            self.T = softmax_temperature
 
-    def forward(self, state: torch.FloatTensor) -> torch.FloatTensor:
-        assert state.size(-1) == self.action_embeddings.weight.size(
-            -1
-        ), "State & item embedding vector size should match."
-
-        items_embedded = self.action_embeddings(self.action_space)
-
-        logits = torch.stack(
-            [torch.sum(s * items_embedded / self.T, dim=1) for s in state]
-        )
+    def forward(
+        self, state: torch.FloatTensor, item_index: torch.LongTensor
+    ) -> torch.FloatTensor:
         if self.adaptive_softmax is True:
-            item_probs = self.softmax(logits, self.action_space).output
+            item_embedded = self.item_embeddings(item_index)
+            log_item_prob = self.softmax(item_embedded, item_index).output
         else:
+            assert state.size(-1) == self.item_embeddings.weight.size(
+                -1
+            ), "State & item embedding vector size should match."
+            items_embedded = self.item_embeddings(self.item_space)
+            logits = torch.stack(
+                [torch.sum(s * items_embedded / self.T, dim=1) for s in state]
+            )
             item_probs = self.softmax(logits)
+            batch_size = item_index.size(0)
+            item_prob = torch.cat(
+                [
+                    item_probs[batch_idx][item_index[batch_idx]]
+                    for batch_idx in range(batch_size)
+                ]
+            ).view(batch_size, -1)
+            log_item_prob = torch.log(item_prob)
 
-        return item_probs
+        return log_item_prob
