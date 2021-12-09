@@ -204,7 +204,7 @@ class RetailrocketDataset(Dataset):
     ) -> pd.DataFrame:
         user_action_index_map = item_index_map.copy()
         user_action_index_map.drop("item_index", axis=1, inplace=True)
-        user_action_index_map["event"] = user_action_index_map.item.map(
+        user_action_index_map["event"] = user_action_index_map.itemid.map(
             lambda _: self.reward_map.keys()
         )
         user_action_index_map.explode(column="event", inplace=True)
