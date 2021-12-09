@@ -231,7 +231,7 @@ class CIKIM19Dataset(Dataset):
     ) -> pd.DataFrame:
         user_action_index_map = item_index_map.copy().drop("item_index", axis=1)
         user_action_index_map["event"] = user_action_index_map.item.map(
-            lambda _: self.reward_map.keys()
+            lambda _: list(self.reward_map.keys())
         )
         user_action_index_map = user_action_index_map.explode(column="event")
         return (
