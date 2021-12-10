@@ -57,6 +57,7 @@ class CIKIM19Dataset(Dataset):
         self.cutoffs = sequence_length_cutoffs
         self.n_samples = n_samples
         self.sample_seed = randint(0, 9)
+        np.random.seed(self.sample_seed)
 
         self.category_id = category_id
         self.user_feature_enabled = user_feature
@@ -155,42 +156,35 @@ class CIKIM19Dataset(Dataset):
             preprocessed = preprocessed[preprocessed.category == self.category_id]
 
         # 2. Split data
-        preprocessed = (
-            preprocessed.drop_duplicates().sort_values(by="time").reset_index(drop=True)
-        )
+        preprocessed.drop_duplicates(inplace=True)
+        preprocessed.sort_values(by="time", inplace=True)
+        preprocessed.reset_index(drop=True, inplace=True)
+
         if self.max_records:
             n_records = min(self.max_records, preprocessed.shape[0])
             preprocessed = preprocessed[preprocessed.index < n_records]
         else:
             n_records = preprocessed.shape[0]
         if self.train is True:
-            preprocessed = preprocessed[
-                preprocessed.index < ceil(n_records * self.split_ratio)
-            ]
+            preprocessed = preprocessed.iloc[: ceil(n_records * self.split_ratio)]
         else:
-            preprocessed = preprocessed[
-                preprocessed.index >= ceil(n_records * (1 - self.split_ratio))
+            preprocessed = preprocessed.iloc[
+                ceil(n_records * (1 - self.split_ratio)) :  # NoQA
             ]
 
         # 3. Alleviate user's history length imbalance (only when training)
         if self.train:
-            user_history_len = (
-                preprocessed.groupby("user")[["time"]]
-                .count()
-                .rename(columns={"time": "n_history"})
-            )
-            users_w_short_seq = np.array(
-                user_history_len[
-                    (self.cutoffs[0][0] <= user_history_len.n_history)
-                    & (user_history_len.n_history <= self.cutoffs[0][1])
-                ].index
-            )
-            users_w_long_seq = np.array(
-                user_history_len[
-                    (self.cutoffs[1][0] <= user_history_len.n_history)
-                    & (user_history_len.n_history <= self.cutoffs[1][1])
-                ].index
-            )
+            user_history_len = preprocessed.groupby("user")[["time"]].count()
+            user_history_len.rename(columns={"time": "n_history"}, inplace=True)
+
+            users_w_short_seq = user_history_len[
+                (self.cutoffs[0][0] <= user_history_len.n_history)
+                & (user_history_len.n_history <= self.cutoffs[0][1])
+            ].index.to_numpy()
+            users_w_long_seq = user_history_len[
+                (self.cutoffs[1][0] <= user_history_len.n_history)
+                & (user_history_len.n_history <= self.cutoffs[1][1])
+            ].index.to_numpy()
             n_short = len(users_w_short_seq)
             n_long = len(users_w_long_seq)
 
@@ -244,48 +238,46 @@ class CIKIM19Dataset(Dataset):
     def _build_user_action_index_map(
         self, item_index_map: pd.DataFrame
     ) -> pd.DataFrame:
-        user_action_index_map = item_index_map.copy().drop("item_index", axis=1)
+        user_action_index_map = item_index_map.copy()
+        user_action_index_map.drop("item_index", axis=1, inplace=True)
         user_action_index_map["event"] = user_action_index_map.item.map(
             lambda _: list(self.reward_map.keys())
         )
         user_action_index_map = user_action_index_map.explode(column="event")
-        return (
-            user_action_index_map.sort_values(by=["item", "event"])
-            .reset_index(drop=True)
-            .rename_axis("user_action_index")
-            .reset_index(drop=False)
-        )
+        user_action_index_map.sort_values(by=["item", "event"], inplace=True)
+        user_action_index_map.reset_index(drop=True, inplace=True)
+        user_action_index_map.rename_axis("user_action_index", inplace=True)
+        user_action_index_map.reset_index(drop=False, inplace=True)
 
     def _build_user_feature_index_map(self) -> pd.DataFrame:
-        return (
-            self.users_df[self.user_feature_cols]
-            .drop_duplicates(subset=self.user_feature_cols)
-            .sort_values(by=self.user_feature_cols)
-            .reset_index(drop=True)
-            .rename_axis("user_feature_index")
-            .reset_index(drop=False)
-        )
+        df = self.users_df[self.user_feature_cols]
+        df.drop_duplicates(inplace=True)
+        df.sort_values(by=self.user_feature_cols, inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        df.rename_axis("user_feature_index", inplace=True)
+        df.reset_index(drop=False, inplace=True)
+
+        return df
 
     def _build_item_feature_index_map(self) -> pd.DataFrame:
+        df = self.users_df[self.item_feature_cols]
+        df.drop_duplicates(inplace=True)
+        df.sort_values(by=self.item_feature_cols, inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        df.rename_axis("item_feature_index", inplace=True)
+        df.reset_index(drop=False, inplace=True)
 
-        return (
-            self.items_df[self.item_feature_cols]
-            .drop_duplicates(subset=self.item_feature_cols)
-            .sort_values(by=self.item_feature_cols)
-            .reset_index(drop=True)
-            .rename_axis("item_feature_index")
-            .reset_index(drop=False)
-        )
+        return df
 
     def _build_item_index_map(self) -> pd.DataFrame:
-        return (
-            self.logs[["item"]]
-            .drop_duplicates()
-            .sort_values(by="item")
-            .reset_index(drop=True)
-            .rename_axis("item_index")
-            .reset_index(drop=False)
-        )
+        df = self.logs[["item"]]
+        df.drop_duplicates(inplace=True)
+        df.sort_values(by="item", inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        df.rename_axis("item_index", inplace=True)
+        df.reset_index(drop=False, inplace=True)
+
+        return df
 
     @staticmethod
     @udf(FloatType())
