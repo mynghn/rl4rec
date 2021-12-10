@@ -249,6 +249,8 @@ class CIKIM19Dataset(Dataset):
         user_action_index_map.rename_axis("user_action_index", inplace=True)
         user_action_index_map.reset_index(drop=False, inplace=True)
 
+        return user_action_index_map
+
     def _build_user_feature_index_map(self) -> pd.DataFrame:
         df = self.users_df[self.user_feature_cols]
         df.drop_duplicates(inplace=True)
