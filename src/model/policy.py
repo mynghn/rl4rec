@@ -8,30 +8,36 @@ class SoftmaxStochasticPolicy(nn.Module):
     def __init__(
         self,
         n_items: int,
-        item_embedding_dim: int,
-        adaptive_softmax: bool = False,
+        adaptive_softmax: bool,
         state_vector_dim: int = None,
         softmax_cutoffs: Sequence = None,
+        item_embedding_dim: int = None,
         softmax_temperature: float = 1.0,
     ):
         super(SoftmaxStochasticPolicy, self).__init__()
 
-        self.item_embeddings = nn.Embedding(
-            num_embeddings=n_items,
-            embedding_dim=item_embedding_dim,
-        )
-
         self.adaptive_softmax = adaptive_softmax
         if self.adaptive_softmax is True:
-            assert state_vector_dim, "State vector dimension should be provided."
+            assert (
+                state_vector_dim is not None and softmax_cutoffs is not None
+            ), "Both state vector dimension & class cutoffs should be provided for adaptive softmax."
+
             self.softmax = nn.AdaptiveLogSoftmaxWithLoss(
-                in_features=state_vector_dim + item_embedding_dim,
+                in_features=state_vector_dim,
                 n_classes=n_items,
                 cutoffs=softmax_cutoffs,
             )
         else:
+            assert (
+                item_embedding_dim is not None
+            ), "Item embedding dimension should be provided for full softmax."
+
             self.softmax = nn.Softmax(dim=1)
             self.item_space = torch.arange(n_items)
+            self.item_embeddings = nn.Embedding(
+                num_embeddings=n_items,
+                embedding_dim=item_embedding_dim,
+            )
             self.T = softmax_temperature
 
     def forward(
@@ -39,10 +45,23 @@ class SoftmaxStochasticPolicy(nn.Module):
     ) -> torch.FloatTensor:
         batch_size = item_index.size(0)
         if self.adaptive_softmax is True:
-            item_embedded = self.item_embeddings(item_index).view(batch_size, -1)
-            log_item_prob = self.softmax(
-                torch.cat((state, item_embedded), dim=1), item_index.squeeze()
-            ).output.view(batch_size, -1)
+            log_item_prob = self.softmax(state, item_index.squeeze()).output.view(
+                batch_size, -1
+            )
+        else:
+            log_items_prob = self.log_probs(state)
+            log_item_prob = torch.cat(
+                [
+                    log_items_prob[batch_idx][item_index[batch_idx]]
+                    for batch_idx in range(batch_size)
+                ]
+            ).view(batch_size, -1)
+
+        return log_item_prob
+
+    def log_probs(self, state: torch.FloatTensor) -> torch.FloatTensor:
+        if self.adaptive_softmax is True:
+            log_items_prob = self.softmax.log_prob(state)
         else:
             assert state.size(-1) == self.item_embeddings.weight.size(
                 -1
@@ -51,13 +70,6 @@ class SoftmaxStochasticPolicy(nn.Module):
             logits = torch.stack(
                 [torch.sum(s * items_embedded / self.T, dim=1) for s in state]
             )
-            item_probs = self.softmax(logits)
-            item_prob = torch.cat(
-                [
-                    item_probs[batch_idx][item_index[batch_idx]]
-                    for batch_idx in range(batch_size)
-                ]
-            ).view(batch_size, -1)
-            log_item_prob = torch.log(item_prob)
+            log_items_prob = torch.log(self.softmax(logits))
 
-        return log_item_prob
+        return log_items_prob
