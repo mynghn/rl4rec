@@ -23,7 +23,7 @@ def evaluate_agent(
     users_total = set()
     users_hit = set()
 
-    agent = agent.to("cpu")
+    agent = agent.to(device)
 
     agent.eval()
     for batch_dict in tqdm(eval_loader, desc="eval"):
