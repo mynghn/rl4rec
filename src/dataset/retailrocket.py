@@ -391,16 +391,10 @@ class RetailrocketDataLoader(DataLoader):
         if self.train:
             return {k: v.to(device) for k, v in batch.items()}
         else:
+            non_tensors = ("user_id", "item_index_episode", "reward_episode")
             batch_on_device = {
-                k: v.to(device)
-                for k, v in batch.items()
-                if k not in ("user_id", "item_index_episode", "reward_episode")
+                k: v.to(device) for k, v in batch.items() if k not in non_tensors
             }
-            batch_on_device["user_id"] = batch["user_id"]
-            batch_on_device["item_index_episode"] = [
-                seq.to(device) for seq in batch["item_index_episode"]
-            ]
-            batch_on_device["reward_episode"] = [
-                seq.to(device) for seq in batch["reward_episode"]
-            ]
+            for k in non_tensors:
+                batch_on_device[k] = batch[k]
             return batch_on_device
