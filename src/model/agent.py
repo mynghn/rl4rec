@@ -58,8 +58,9 @@ class TopKOfflineREINFORCE(nn.Module):
         log_action_policy_prob = self.action_policy(state, item_index)
         action_policy_prob = torch.exp(log_action_policy_prob)
 
-        log_behavior_policy_prob = self.behavior_policy(state.detach(), item_index)
-        behavior_policy_prob = torch.exp(log_behavior_policy_prob)
+        behavior_policy_prob = torch.exp(
+            self.behavior_policy(state.detach(), item_index)
+        )
 
         _lambda_K = self._compute_lambda_K(policy_prob=action_policy_prob)
         _importance_weight = self._compute_importance_weight(
@@ -77,12 +78,7 @@ class TopKOfflineREINFORCE(nn.Module):
     ) -> torch.FloatTensor:
         batch_size = item_index.size(0)
         if self.behavior_policy.adaptive_softmax is True:
-            item_embedded = self.behavior_policy.item_embeddings(item_index).view(
-                batch_size, -1
-            )
-            out = self.behavior_policy.softmax(
-                torch.cat((state.detach(), item_embedded), dim=1), item_index.squeeze()
-            )
+            out = self.behavior_policy.softmax(state.detach(), item_index.squeeze())
             return out.loss
         else:
             assert state.size(-1) == self.behavior_policy.item_embeddings.weight.size(
@@ -122,11 +118,23 @@ class TopKOfflineREINFORCE(nn.Module):
     def recommend(
         self, state: torch.FloatTensor
     ) -> Tuple[List[torch.LongTensor], List[torch.FloatTensor]]:
-        if isinstance(self.action_policy.softmax, nn.AdaptiveLogSoftmaxWithLoss):
-            log_action_policy_probs = self.action_policy(state)
+        if self.action_policy.adaptive_softmax is True:
+            log_action_policy_probs = self.action_policy.log_probs(state)
             action_policy_probs = torch.exp(log_action_policy_probs)
         else:
-            action_policy_probs = self.action_policy(state)
+            assert state.size(-1) == self.action_policy.item_embeddings.weight.size(
+                -1
+            ), "State & item embedding vector size should match."
+            items_embedded = self.action_policy.item_embeddings(
+                self.action_policy.item_space
+            )
+            logits = torch.stack(
+                [
+                    torch.sum(s * items_embedded / self.action_policy.T, dim=1)
+                    for s in state.detach()
+                ]
+            )
+            action_policy_probs = self.action_policy.softmax(logits)
 
         sorted_indices = action_policy_probs.argsort(dim=1, descending=True)
         indexed_items = sorted_indices[:, : self.K]
