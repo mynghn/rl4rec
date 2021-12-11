@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, collect_list, from_unixtime, lit, size, udf
+from pyspark.sql.functions import col, collect_list, from_unixtime, size, struct, udf
 from pyspark.sql.types import (
     ArrayType,
     FloatType,
@@ -224,6 +224,25 @@ class RetailrocketDataset(Dataset):
                     break
             return sliced
 
+    def _slice_episode(
+        self, followings: List[Dict[str, Union[datetime.datetime, int, float]]]
+    ) -> Optional[Tuple[List[int], List[float]]]:
+        first_event = followings.pop(0)
+        start_time = first_event["timestamp"]
+        end_time = start_time + datetime.timedelta(days=self.episode_length)
+        if end_time <= datetime.datetime.fromtimestamp(
+            self.logs.timestamp.max() / 1000
+        ):
+            item_indices = [first_event["item_index"]]
+            rewards = [first_event["reward"]]
+            for event in followings:
+                if event["timestamp"] <= end_time:
+                    item_indices.append(event["item_index"])
+                    rewards.append(event["reward"])
+                else:
+                    break
+            return item_indices, rewards
+
     def _build_episodic_data(self, spark: SparkSession) -> pd.DataFrame:
         index_merged = self.logs.merge(
             self.item_index_map, on="itemid", how="inner"
@@ -232,7 +251,7 @@ class RetailrocketDataset(Dataset):
         spark.conf.set("spark.sql.execution.arrow.enabled", "true")
         sdf = spark.createDataFrame(index_merged, schema=self.spark_schema)
 
-        with_historyNepisode = (
+        with_historyNfollowings = (
             sdf.withColumn(
                 "user_history",
                 collect_list("user_action_index").over(
@@ -246,67 +265,39 @@ class RetailrocketDataset(Dataset):
                 "timestamp", from_unixtime(col("timestamp") / 1000).cast("timestamp")
             )
             .withColumn(
-                "following_timestamps",
-                collect_list("timestamp").over(
+                "followings",
+                collect_list(struct("timestamp", "item_index", "reward")).over(
                     W.partitionBy("visitorid")
                     .orderBy("timestamp")
                     .rowsBetween(W.currentRow, W.unboundedFollowing)
                 ),
             )
-            .withColumn(
-                "following_items",
-                collect_list("item_index").over(
-                    W.partitionBy("visitorid")
-                    .orderBy("timestamp")
-                    .rowsBetween(W.currentRow, W.unboundedFollowing)
-                ),
-            )
-            .withColumn(
-                "following_rewards",
-                collect_list("reward").over(
-                    W.partitionBy("visitorid")
-                    .orderBy("timestamp")
-                    .rowsBetween(W.currentRow, W.unboundedFollowing)
-                ),
-            )
-            .withColumn(
-                "episode",
-                self._build_episode(
-                    "following_timestamps",
-                    "following_items",
-                    "following_rewards",
-                    lit(self.episode_length),
-                    lit(
-                        datetime.datetime.fromtimestamp(
-                            self.logs.timestamp.max() / 1000
-                        )
-                    ),
-                ),
-            )
-            .filter(col("episode").isNotNull())
         )
 
         if self.train is True:
-            episodes_df = (
-                with_historyNepisode.withColumn(
-                    "reward_episode", col("episode").getItem("reward")
-                )
-                .withColumn(
-                    "return",
-                    self._compute_return("reward_episode", lit(self.discount_factor)),
-                )
-                .select(*self.train_cols)
-            )
+            data = []
+            for row in with_historyNfollowings.select(
+                "user_history", "followings"
+            ).toLocalIterator():
+                episode = self._slice_episode(row.followings)
+                if episode:
+                    item_indices, rewards = episode
+                    gammas = (1.0 - self.discount_factor) ** np.arange(len(rewards))
+                    episodic_return = float(gammas @ np.array(rewards))
+                    data.append([row.user_history, episodic_return, item_indices[0]])
         else:
-            episodes_df = (
-                with_historyNepisode.withColumn(
-                    "item_index_episode", col("episode").getItem("item_index")
-                )
-                .withColumn("reward_episode", col("episode").getItem("reward"))
-                .select(*self.eval_cols)
-            )
+            data = []
+            for row in with_historyNfollowings.select(
+                "visitorid", "user_history", "followings"
+            ).toLocalIterator():
+                episode = self._slice_episode(row.followings)
+                if episode:
+                    item_indices, rewards = episode
+                    data.append(
+                        [row.visitorid, row.user_history, rewards, item_indices]
+                    )
 
-        return episodes_df.toPandas()
+        return np.array(data, dtype=object)
 
     def __len__(self) -> int:
         return self.data.shape[0]
