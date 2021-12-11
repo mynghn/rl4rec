@@ -8,15 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import (
-    col,
-    collect_list,
-    from_unixtime,
-    lit,
-    size,
-    struct,
-    udf,
-)
+from pyspark.sql.functions import col, collect_list, from_unixtime, lit, size, udf
 from pyspark.sql.types import (
     ArrayType,
     FloatType,
@@ -214,25 +206,20 @@ class RetailrocketDataset(Dataset):
             )
         )
     )
-    def _slice_episode(
-        episode: List[Dict[str, Union[datetime.datetime, int, float]]],
+    def _build_episode(
+        timestamps: List[datetime.datetime],
+        items: List[int],
+        rewards: List[float],
         length: int,
         max_time: datetime.datetime,
     ) -> Optional[List[Dict[str, Union[int, float]]]]:
-        start_time = episode[0]["timestamp"]
+        start_time = timestamps.pop(0)
         end_time = start_time + datetime.timedelta(days=length)
         if end_time <= max_time:
-            sliced = [
-                {"item_index": episode[0]["item_index"], "reward": episode[0]["reward"]}
-            ]
-            for idx in range(1, len(episode)):
-                if episode[idx]["timestamp"] <= end_time:
-                    sliced.append(
-                        {
-                            "item_index": episode[idx]["item_index"],
-                            "reward": episode[idx]["reward"],
-                        }
-                    )
+            sliced = [{"item_index": items.pop(0), "reward": rewards.pop(0)}]
+            for ts, item_index, reward in zip(timestamps, items, rewards):
+                if ts <= end_time:
+                    sliced.append({"item_index": item_index, "reward": reward})
                 else:
                     break
             return sliced
@@ -259,8 +246,24 @@ class RetailrocketDataset(Dataset):
                 "timestamp", from_unixtime(col("timestamp") / 1000).cast("timestamp")
             )
             .withColumn(
-                "episode",
-                collect_list(struct("timestamp", "item_index", "reward")).over(
+                "following_timestamps",
+                collect_list("timestamp").over(
+                    W.partitionBy("visitorid")
+                    .orderBy("timestamp")
+                    .rowsBetween(W.currentRow, W.unboundedFollowing)
+                ),
+            )
+            .withColumn(
+                "following_items",
+                collect_list("item_index").over(
+                    W.partitionBy("visitorid")
+                    .orderBy("timestamp")
+                    .rowsBetween(W.currentRow, W.unboundedFollowing)
+                ),
+            )
+            .withColumn(
+                "following_rewards",
+                collect_list("reward").over(
                     W.partitionBy("visitorid")
                     .orderBy("timestamp")
                     .rowsBetween(W.currentRow, W.unboundedFollowing)
@@ -268,8 +271,10 @@ class RetailrocketDataset(Dataset):
             )
             .withColumn(
                 "episode",
-                self._slice_episode(
-                    "episode",
+                self._build_episode(
+                    "following_timestamps",
+                    "following_items",
+                    "following_rewards",
                     lit(self.episode_length),
                     lit(
                         datetime.datetime.fromtimestamp(
@@ -278,7 +283,6 @@ class RetailrocketDataset(Dataset):
                     ),
                 ),
             )
-            .filter(col("episode").isNotNull())
         )
 
         if self.train is True:
@@ -307,7 +311,7 @@ class RetailrocketDataset(Dataset):
         return self.data.shape[0]
 
     def __getitem__(self, idx: Union[int, List[int]]) -> np.ndarray:
-        return self.data.iloc[idx].to_numpy()
+        return self.data.iloc[idx]
 
 
 class RetailrocketDataLoader(DataLoader):
