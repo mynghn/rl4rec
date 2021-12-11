@@ -283,6 +283,7 @@ class RetailrocketDataset(Dataset):
                     ),
                 ),
             )
+            .filter(col("episode").isNotNull())
         )
 
         if self.train is True:
