@@ -8,7 +8,14 @@ import pandas as pd
 import torch
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import collect_list, lit, size, udf
-from pyspark.sql.types import FloatType
+from pyspark.sql.types import (
+    FloatType,
+    IntegerType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
 from pyspark.sql.window import Window as W
 from torch.utils.data import DataLoader, Dataset
 
@@ -30,6 +37,19 @@ class RetailrocketDataset(Dataset):
     }
 
     reward_map = {"view": 1.0, "addtocart": 2.0, "transaction": 4.0}
+
+    spark_schema = StructType(
+        [
+            StructField("timestamp", LongType()),
+            StructField("visitorid", StringType()),
+            StructField("event", StringType()),
+            StructField("itemid", StringType()),
+            StructField("categoryid", StringType()),
+            StructField("reward", FloatType()),
+            StructField("item_index", IntegerType()),
+            StructField("user_action_index", IntegerType()),
+        ]
+    )
 
     train_cols = ["user_history", "return", "item_index"]
     eval_cols = ["visitorid", "user_history", "item_index_episode", "reward_episode"]
@@ -216,7 +236,7 @@ class RetailrocketDataset(Dataset):
         return user_action_index_map
 
     def _build_item_index_map(self) -> pd.DataFrame:
-        df = self.logs[["itemid"]]
+        df = self.logs[["itemid"]].copy()
         df.drop_duplicates(inplace=True)
         df.sort_values(by="itemid", inplace=True)
         df.reset_index(drop=True, inplace=True)
@@ -237,7 +257,7 @@ class RetailrocketDataset(Dataset):
         ).merge(self.user_action_index_map, on=["itemid", "event"], how="inner")
 
         spark.conf.set("spark.sql.execution.arrow.enabled", "true")
-        sdf = spark.createDataFrame(index_merged)
+        sdf = spark.createDataFrame(index_merged, schema=self.spark_schema)
 
         with_user_history = sdf.withColumn(
             "user_history",
@@ -297,22 +317,12 @@ class RetailrocketDataset(Dataset):
 class RetailrocketDataLoader(DataLoader):
     padding_signal = -1
 
-    def __init__(self, train: bool, dataset: Dataset, *args, **kargs):
+    def __init__(self, train: bool, *args, **kargs):
         self.train = train
         if self.train is True:
-            super().__init__(
-                dataset=dataset,
-                collate_fn=self.train_collate_func,
-                *args,
-                **kargs,
-            )
+            super().__init__(collate_fn=self.train_collate_func, *args, **kargs)
         else:
-            super().__init__(
-                dataset=dataset,
-                collate_fn=self.eval_collate_func,
-                *args,
-                **kargs,
-            )
+            super().__init__(collate_fn=self.eval_collate_func, *args, **kargs)
 
     def pad_sequence(
         self, user_history: Sequence[Sequence[int]]
