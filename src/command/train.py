@@ -13,7 +13,7 @@ def train_agent(
     train_loader: CIKIM19DataLoader,
     n_epochs: int,
     device: torch.device = torch.device("cpu"),
-    debug: bool = True,
+    debug: bool = False,
 ) -> Optional[Tuple[List[float], List[float]]]:
     agent = agent.to(device)
     agent.train()
