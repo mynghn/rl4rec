@@ -45,9 +45,7 @@ class SoftmaxStochasticPolicy(nn.Module):
     ) -> torch.FloatTensor:
         batch_size = item_index.size(0)
         if self.adaptive_softmax is True:
-            log_item_prob = self.softmax(state, item_index.squeeze()).output.view(
-                batch_size, -1
-            )
+            log_item_prob = self.softmax(state, item_index.squeeze()).output
         else:
             log_items_prob = self.log_probs(state)
             log_item_prob = torch.cat(
@@ -55,9 +53,9 @@ class SoftmaxStochasticPolicy(nn.Module):
                     log_items_prob[batch_idx][item_index[batch_idx]]
                     for batch_idx in range(batch_size)
                 ]
-            ).view(batch_size, -1)
+            )
 
-        return log_item_prob
+        return log_item_prob.view(batch_size, -1)
 
     def log_probs(self, state: torch.FloatTensor) -> torch.FloatTensor:
         if self.adaptive_softmax is True:
