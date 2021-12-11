@@ -175,7 +175,7 @@ class RetailrocketDataset(Dataset):
         # 2. Assign event index within user history
         df.sort_values(by=["visitorid", "timestamp"], inplace=True)
         df.reset_index(drop=True, inplace=True)
-        groupedby_user = self.data.groupby(by="visitorid")
+        groupedby_user = self.df.groupby(by="visitorid")
         df["event_index_in_user_history"] = groupedby_user.cumcount()
 
         # 3. Build lifetime sequence books by users
@@ -207,7 +207,7 @@ class RetailrocketDataset(Dataset):
         return self.df.shape[0]
 
     def __getitem__(self, idx: int) -> List[Union[List[int], int, float]]:
-        row = self.data.iloc[idx]
+        row = self.df.iloc[idx]
         user_id = row["visitorid"]
         index_in_history = row["event_index_in_user_history"]
 
