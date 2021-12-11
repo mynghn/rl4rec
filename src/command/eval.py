@@ -47,16 +47,10 @@ def evaluate_agent(
             item_index_tensor = torch.LongTensor(
                 [seq[0] for seq in batch["item_index_episode"]]
             ).view(batch_size, -1)
-            episodic_return_tensor = torch.FloatTensor(
-                [
-                    compute_return(rewards=seq, discount_factor=discount_factor)
-                    for seq in batch["reward_episode"]
-                ]
-            ).view(batch_size, -1)
             corrected_return = agent.get_corrected_return(
                 state=state,
                 item_index=item_index_tensor,
-                episodic_return=episodic_return_tensor,
+                episodic_return=batch["return"],
                 behavior_policy=eval_behavior_policy,
             )
             expected_return_cumulative += corrected_return.sum().cpu().item()
