@@ -192,9 +192,8 @@ class TopKOfflineREINFORCE(nn.Module):
         beta_state: torch.FloatTensor,
         item_index: torch.LongTensor,
         episodic_return: torch.FloatTensor,
-        behavior_policy: SoftmaxStochasticPolicy,
     ) -> torch.FloatTensor:
         action_policy_prob = torch.exp(self.action_policy(pi_state, item_index))
-        behavior_policy_prob = torch.exp(behavior_policy(beta_state, item_index))
+        behavior_policy_prob = torch.exp(self.behavior_policy(beta_state, item_index))
         importance_weight = torch.div(action_policy_prob, behavior_policy_prob)
         return torch.mul(importance_weight, episodic_return)
