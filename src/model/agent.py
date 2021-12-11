@@ -12,8 +12,9 @@ from .policy import SoftmaxStochasticPolicy
 class TopKOfflineREINFORCE(nn.Module):
     def __init__(
         self,
-        state_network: StateTransitionNetwork,
+        pi_state_network: StateTransitionNetwork,
         action_policy: SoftmaxStochasticPolicy,
+        beta_state_network: StateTransitionNetwork,
         behavior_policy: SoftmaxStochasticPolicy,
         action_policy_optimizer: Optimizer,
         behavior_policy_optimizer: Optimizer,
@@ -22,8 +23,9 @@ class TopKOfflineREINFORCE(nn.Module):
     ):
         super(TopKOfflineREINFORCE, self).__init__()
 
-        self.state_network = state_network
+        self.pi_state_network = pi_state_network
         self.action_policy = action_policy
+        self.beta_state_network = beta_state_network
         self.behavior_policy = behavior_policy
 
         self.weight_cap = weight_cap
@@ -50,15 +52,16 @@ class TopKOfflineREINFORCE(nn.Module):
 
     def action_policy_loss(
         self,
-        state: torch.FloatTensor,
+        pi_state: torch.FloatTensor,
+        beta_state: torch.FloatTensor,
         item_index: torch.LongTensor,
         episodic_return: torch.FloatTensor,
     ) -> torch.FloatTensor:
-        log_action_policy_prob = self.action_policy(state, item_index)
+        log_action_policy_prob = self.action_policy(pi_state, item_index)
         action_policy_prob = torch.exp(log_action_policy_prob)
 
         behavior_policy_prob = torch.exp(
-            self.behavior_policy(state.detach(), item_index)
+            self.behavior_policy(beta_state.detach(), item_index)
         )
 
         _lambda_K = self._compute_lambda_K(policy_prob=action_policy_prob)
@@ -73,14 +76,16 @@ class TopKOfflineREINFORCE(nn.Module):
         )
 
     def behavior_policy_loss(
-        self, state: torch.FloatTensor, item_index: torch.LongTensor
+        self, beta_state: torch.FloatTensor, item_index: torch.LongTensor
     ) -> torch.FloatTensor:
         batch_size = item_index.size(0)
         if self.behavior_policy.adaptive_softmax is True:
-            out = self.behavior_policy.softmax(state.detach(), item_index.squeeze())
+            out = self.behavior_policy.softmax(beta_state, item_index.squeeze())
             return out.loss
         else:
-            assert state.size(-1) == self.behavior_policy.item_embeddings.weight.size(
+            assert beta_state.size(
+                -1
+            ) == self.behavior_policy.item_embeddings.weight.size(
                 -1
             ), "State & item embedding vector size should match."
             items_embedded = self.behavior_policy.item_embeddings(
@@ -89,7 +94,7 @@ class TopKOfflineREINFORCE(nn.Module):
             logits = torch.stack(
                 [
                     torch.sum(s * items_embedded / self.behavior_policy.T, dim=1)
-                    for s in state.detach()
+                    for s in beta_state
                 ]
             )
             log_behavior_policy_probs = torch.log(self.behavior_policy.softmax(logits))
@@ -99,6 +104,16 @@ class TopKOfflineREINFORCE(nn.Module):
             for batch_idx in range(batch_size):
                 actual_action_probs[batch_idx][item_index[batch_idx]] = 1.0
             return self.kl_div_loss(log_behavior_policy_probs, actual_action_probs)
+
+    def update_action_policy(self, action_policy_loss: torch.FloatTensor):
+        self.action_policy_optimizer.zero_grad()
+        action_policy_loss.backward()
+        self.action_policy_optimizer.step()
+
+    def update_behavior_policy(self, behavior_policy_loss: torch.FloatTensor):
+        self.behavior_policy_optimizer.zero_grad()
+        behavior_policy_loss.backward()
+        self.behavior_policy_optimizer.step()
 
     def update(
         self,
