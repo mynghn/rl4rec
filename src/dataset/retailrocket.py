@@ -1,14 +1,24 @@
+import datetime
 import os
 from math import ceil
 from random import randint
-from typing import Dict, List, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import torch
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import collect_list, lit, size, udf
+from pyspark.sql.functions import (
+    col,
+    collect_list,
+    from_unixtime,
+    lit,
+    size,
+    struct,
+    udf,
+)
 from pyspark.sql.types import (
+    ArrayType,
     FloatType,
     IntegerType,
     LongType,
@@ -60,6 +70,7 @@ class RetailrocketDataset(Dataset):
         data_path: str,
         train: bool,
         split_ratio: float,
+        category_id: str = None,
         train_item_index_map: pd.DataFrame = None,
         sequence_length_cutoffs: Tuple[Tuple[int, int], Tuple[int, int]] = (
             (6, 50),
@@ -67,7 +78,7 @@ class RetailrocketDataset(Dataset):
         ),
         n_samples: Tuple[int, int] = (20000, 60000),
         discount_factor: float = 1e-2,
-        category_id: str = None,
+        episode_length: int = 7,
     ):
         self.data_path = data_path
 
@@ -82,6 +93,7 @@ class RetailrocketDataset(Dataset):
         self.category_id = category_id
 
         self.discount_factor = discount_factor
+        self.episode_length = episode_length
 
         # 0. Fetch Raw data
         self.events_df = self._get_events_df()
@@ -152,69 +164,9 @@ class RetailrocketDataset(Dataset):
         if self.train is True:
             preprocessed = preprocessed.iloc[: ceil(n_records * self.split_ratio)]
         else:
-            preprocessed = preprocessed.iloc[
-                ceil(n_records * (1 - self.split_ratio)) :  # NoQA
-            ]
+            preprocessed = preprocessed.iloc[ceil(n_records * (1 - self.split_ratio)) :]
 
-        # 3. Alleviate user's history length imbalance (only when training)
-        if self.train:
-            user_history_len = preprocessed.groupby("visitorid")[["timestamp"]].count()
-            user_history_len.rename(columns={"timestamp": "n_history"}, inplace=True)
-
-            users_w_short_seq = user_history_len[
-                (self.cutoffs[0][0] <= user_history_len.n_history)
-                & (user_history_len.n_history <= self.cutoffs[0][1])
-            ].index.to_numpy()
-            users_w_long_seq = user_history_len[
-                (self.cutoffs[1][0] <= user_history_len.n_history)
-                & (user_history_len.n_history <= self.cutoffs[1][1])
-            ].index.to_numpy()
-            n_short = len(users_w_short_seq)
-            n_long = len(users_w_long_seq)
-
-            if n_short < self.n_samples[0] and n_long < self.n_samples[1]:
-                short_long_ratio = self.n_samples[0] / self.n_samples[1]
-                if n_short / n_long - 1e-2 < short_long_ratio < n_short / n_long + 1e-2:
-                    users_w_short_seq_sampled = users_w_short_seq
-                    users_w_long_seq_sampled = users_w_long_seq
-                elif short_long_ratio > n_short / n_long:
-                    users_w_short_seq_sampled = users_w_short_seq
-                    _n_sample_long = ceil(n_short / short_long_ratio)
-                    users_w_long_seq_sampled = np.random.choice(
-                        users_w_long_seq, _n_sample_long, replace=False
-                    )
-                elif short_long_ratio < n_short / n_long:
-                    _n_sample_short = ceil(n_long * short_long_ratio)
-                    users_w_short_seq_sampled = np.random.choice(
-                        users_w_short_seq, _n_sample_short, replace=False
-                    )
-                    users_w_long_seq_sampled = users_w_long_seq
-            elif n_short < self.n_samples[0]:
-                users_w_short_seq_sampled = users_w_short_seq
-                _n_sample_long = ceil(n_short * self.n_samples[1] / self.n_samples[0])
-                users_w_long_seq_sampled = np.random.choice(
-                    users_w_long_seq, _n_sample_long, replace=False
-                )
-            elif n_long < self.n_samples[1]:
-                _n_sample_short = ceil(n_long * self.n_samples[0] / self.n_samples[1])
-                users_w_short_seq_sampled = np.random.choice(
-                    users_w_short_seq, _n_sample_short, replace=False
-                )
-                users_w_long_seq_sampled = users_w_long_seq
-            else:
-                users_w_short_seq_sampled = np.random.choice(
-                    users_w_short_seq, self.n_samples[0], replace=False
-                )
-                users_w_long_seq_sampled = np.random.choice(
-                    users_w_long_seq, self.n_samples[1], replace=False
-                )
-
-            users_sampled = np.concatenate(
-                [users_w_short_seq_sampled, users_w_long_seq_sampled]
-            )
-            preprocessed = preprocessed[preprocessed.visitorid.isin(users_sampled)]
-
-        # 4. Assign reward values
+        # 3. Assign reward values
         preprocessed["reward"] = preprocessed.event.map(self.reward_map)
 
         return preprocessed
@@ -251,6 +203,40 @@ class RetailrocketDataset(Dataset):
         gammas = (1.0 - discount_factor) ** np.arange(len(rewards))
         return float(gammas @ np.array(rewards))
 
+    @staticmethod
+    @udf(
+        ArrayType(
+            StructType(
+                [
+                    StructField("item_index", IntegerType()),
+                    StructField("reward", FloatType()),
+                ]
+            )
+        )
+    )
+    def _slice_episode(
+        episode: List[Dict[str, Union[datetime.datetime, int, float]]],
+        length: int,
+        max_time: datetime.datetime,
+    ) -> Optional[List[Dict[str, Union[int, float]]]]:
+        start_time = episode[0]["timestamp"]
+        end_time = start_time + datetime.timedelta(days=length)
+        if end_time <= max_time:
+            sliced = [
+                {"item_index": episode[0]["item_index"], "reward": episode[0]["reward"]}
+            ]
+            for idx in range(1, len(episode)):
+                if episode[idx]["timestamp"] <= end_time:
+                    sliced.append(
+                        {
+                            "item_index": episode[idx]["item_index"],
+                            "reward": episode[idx]["reward"],
+                        }
+                    )
+                else:
+                    break
+            return sliced
+
     def _build_episodic_data(self, spark: SparkSession) -> pd.DataFrame:
         index_merged = self.logs.merge(
             self.item_index_map, on="itemid", how="inner"
@@ -259,24 +245,46 @@ class RetailrocketDataset(Dataset):
         spark.conf.set("spark.sql.execution.arrow.enabled", "true")
         sdf = spark.createDataFrame(index_merged, schema=self.spark_schema)
 
-        with_user_history = sdf.withColumn(
-            "user_history",
-            collect_list("user_action_index").over(
-                W.partitionBy("visitorid")
-                .orderBy("timestamp")
-                .rowsBetween(W.unboundedPreceding, -1)
-            ),
-        ).filter(size("user_history") > 0)
+        with_historyNepisode = (
+            sdf.withColumn(
+                "user_history",
+                collect_list("user_action_index").over(
+                    W.partitionBy("visitorid")
+                    .orderBy("timestamp")
+                    .rowsBetween(W.unboundedPreceding, -1)
+                ),
+            )
+            .filter(size("user_history") > 0)
+            .withColumn(
+                "timestamp", from_unixtime(col("timestamp") / 1000).cast("timestamp")
+            )
+            .withColumn(
+                "episode",
+                collect_list(struct("timestamp", "item_index", "reward")).over(
+                    W.partitionBy("visitorid")
+                    .orderBy("timestamp")
+                    .rowsBetween(W.currentRow, W.unboundedFollowing)
+                ),
+            )
+            .withColumn(
+                "episode",
+                self._slice_episode(
+                    "episode",
+                    lit(self.episode_length),
+                    lit(
+                        datetime.datetime.fromtimestamp(
+                            self.logs.timestamp.max() / 1000
+                        )
+                    ),
+                ),
+            )
+            .filter(col("episode").isNotNull())
+        )
 
         if self.train is True:
             episodes_df = (
-                with_user_history.withColumn(
-                    "reward_episode",
-                    collect_list("reward").over(
-                        W.partitionBy("visitorid")
-                        .orderBy("timestamp")
-                        .rowsBetween(W.currentRow, W.unboundedFollowing)
-                    ),
+                with_historyNepisode.withColumn(
+                    "reward_episode", col("episode").getItem("reward")
                 )
                 .withColumn(
                     "return",
@@ -286,22 +294,10 @@ class RetailrocketDataset(Dataset):
             )
         else:
             episodes_df = (
-                with_user_history.withColumn(
-                    "item_index_episode",
-                    collect_list("item_index").over(
-                        W.partitionBy("visitorid")
-                        .orderBy("timestamp")
-                        .rowsBetween(W.currentRow, W.unboundedFollowing)
-                    ),
+                with_historyNepisode.withColumn(
+                    "item_index_episode", col("episode").getItem("item_index")
                 )
-                .withColumn(
-                    "reward_episode",
-                    collect_list("reward").over(
-                        W.partitionBy("visitorid")
-                        .orderBy("timestamp")
-                        .rowsBetween(W.currentRow, W.unboundedFollowing)
-                    ),
-                )
+                .withColumn("reward_episode", col("episode").getItem("reward"))
                 .select(*self.eval_cols)
             )
 
