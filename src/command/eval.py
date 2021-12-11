@@ -23,20 +23,19 @@ def evaluate_agent(
     agent.eval()
     eval_behavior_policy.eval()
 
-    expected_return = 0.0
-
-    precision_log = []
-    recall_log = []
-    ndcg_log = []
+    expected_return_cumulative = 0.0
+    precision_cumulatvie = 0.0
+    recall_cumulative = 0.0
+    ndcg_cumulative = 0.0
     hit = 0
     users_hit = set()
 
-    epoch_cnt = 0
     iter_cnt = 0
     users_total = set()
     with torch.no_grad():
         for batch in tqdm(eval_loader, desc="eval"):
             batch = eval_loader.to(batch=batch, device=device)
+            batch_size = len(batch["user_id"])
 
             state = agent.state_network(
                 user_history=batch["user_history"],
@@ -47,20 +46,20 @@ def evaluate_agent(
             # 1. Expected return of Agent's policy over samples from eval data behavior policy
             item_index_tensor = torch.LongTensor(
                 [seq[0] for seq in batch["item_index_episode"]]
-            ).view(eval_loader.batch_size, -1)
+            ).view(batch_size, -1)
             episodic_return_tensor = torch.FloatTensor(
                 [
                     compute_return(rewards=seq, discount_factor=discount_factor)
                     for seq in batch["reward_episode"]
                 ]
-            ).view(eval_loader.batch_size, -1)
+            ).view(batch_size, -1)
             corrected_return = agent.get_corrected_return(
                 state=state,
                 item_index=item_index_tensor,
                 episodic_return=episodic_return_tensor,
                 behavior_policy=eval_behavior_policy,
             )
-            expected_return += corrected_return.mean().cpu().item()
+            expected_return_cumulative += corrected_return.sum().cpu().item()
 
             # 2. Compute metrics from traditional RecSys domain
             recommended_item_indices, _ = agent.get_top_recommendations(state, agent.K)
@@ -76,14 +75,12 @@ def evaluate_agent(
                 actual_item_set = set(actual_seq)
                 recommendation_set = set(recommendation_list)
 
-                intersections = actual_item_set & recommendation_set
-                TP = len(intersections)
-                if TP > 0:
+                true_positive = len(actual_item_set & recommendation_set)
+                if true_positive > 0:
                     hit += 1
                     users_hit.add(user_id)
-
-                precision = TP / len(recommendation_set)
-                recall = TP / len(actual_item_set)
+                precision = true_positive / len(recommendation_set)
+                recall = true_positive / len(actual_item_set)
                 ndcg = compute_ndcg(
                     recommendations=recommendation_list,
                     relevance_book=build_relevance_book(
@@ -93,9 +90,9 @@ def evaluate_agent(
                     ),
                 )
 
-                precision_log.append(precision)
-                recall_log.append(recall)
-                ndcg_log.append(ndcg)
+                precision_cumulatvie += precision
+                recall_cumulative += recall
+                ndcg_cumulative += ndcg
 
                 if debug:
                     print(f"User: {user_id}")
@@ -104,15 +101,14 @@ def evaluate_agent(
                     print(f"1. nDCG: {ndcg:2.%}")
                     print("=" * 20)
 
-            epoch_cnt += 1
-            iter_cnt += eval_loader.batch_size
+            iter_cnt += batch_size
             users_total |= set(batch["user_id"])
 
     return {
-        "E[Return]": expected_return / epoch_cnt,
-        f"Precision at {agent.K}": sum(precision_log) / iter_cnt,
-        f"Recall at {agent.K}": sum(recall_log) / iter_cnt,
-        f"nDCG at {agent.K}": sum(ndcg_log) / iter_cnt,
+        "E[Return]": expected_return_cumulative / iter_cnt,
+        f"Precision at {agent.K}": precision_cumulatvie / iter_cnt,
+        f"Recall at {agent.K}": recall_cumulative / iter_cnt,
+        f"nDCG at {agent.K}": ndcg_cumulative / iter_cnt,
         "Hit Rate": hit / iter_cnt,
         "User Hit Rate": len(users_hit) / len(users_total),
     }
