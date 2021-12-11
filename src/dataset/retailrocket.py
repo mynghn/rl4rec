@@ -1,6 +1,6 @@
 import os
 from math import ceil
-from typing import Dict, List, Sequence, Tuple, Union
+from typing import Any, Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -206,8 +206,15 @@ class RetailrocketDataset(Dataset):
     def __len__(self) -> int:
         return self.df.shape[0]
 
-    def __getitem__(self, idx: int) -> List[Union[List[int], int, float]]:
-        row = self.df.iloc[idx]
+    def __getitem__(self, idx: Any) -> List[Any]:
+        if isinstance(idx, int):
+            row = self.df.iloc[idx]
+            return self._get_data_line(row)
+        else:
+            indexed = self.df.iloc[idx]
+            return [self._get_data_line(row) for _, row in indexed.iterrows()]
+
+    def _get_data_line(self, row: pd.Series) -> List[Union[List[int], int, float]]:
         user_id = row["visitorid"]
         index_in_history = row["event_index_in_user_history"]
 
@@ -308,10 +315,12 @@ class RetailrocketDataLoader(DataLoader):
                 data=padded_user_history[sorted_idx],
                 lengths=sorted_lengths,
             ),
-            "item_index": torch.from_numpy(item_index.astype(np.int64)).view(
+            "item_index": torch.from_numpy(
+                item_index[sorted_idx].astype(np.int64)
+            ).view(batch_size, -1),
+            "return": torch.from_numpy(_return[sorted_idx].astype(np.float32)).view(
                 batch_size, -1
             ),
-            "return": torch.from_numpy(_return.astype(np.float32)).view(batch_size, -1),
         }
 
     def eval_collate_func(
@@ -333,14 +342,16 @@ class RetailrocketDataLoader(DataLoader):
         sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
 
         return {
-            "user_id": list(user_id),
+            "user_id": list(user_id[sorted_idx]),
             "user_history": PaddedNSortedUserHistoryBatch(
                 data=padded_user_history[sorted_idx],
                 lengths=sorted_lengths,
             ),
-            "item_index_episode": list(item_index_episode),
-            "reward_episode": list(reward_episode),
-            "return": torch.from_numpy(_return.astype(np.float32)).view(len(batch), -1),
+            "item_index_episode": list(item_index_episode[sorted_idx]),
+            "reward_episode": list(reward_episode[sorted_idx]),
+            "return": torch.from_numpy(_return[sorted_idx].astype(np.float32)).view(
+                len(batch), -1
+            ),
         }
 
     def to(self, batch: Dict, device: torch.device) -> Dict:
