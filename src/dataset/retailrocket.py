@@ -1,24 +1,10 @@
-import datetime
 import os
 from math import ceil
-from random import randint
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import torch
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, collect_list, from_unixtime, size, struct, udf
-from pyspark.sql.types import (
-    ArrayType,
-    FloatType,
-    IntegerType,
-    LongType,
-    StringType,
-    StructField,
-    StructType,
-)
-from pyspark.sql.window import Window as W
 from torch.utils.data import DataLoader, Dataset
 
 from .custom_typings import PaddedNSortedUserHistoryBatch
@@ -40,52 +26,25 @@ class RetailrocketDataset(Dataset):
 
     reward_map = {"view": 1.0, "addtocart": 2.0, "transaction": 4.0}
 
-    spark_schema = StructType(
-        [
-            StructField("timestamp", LongType()),
-            StructField("visitorid", StringType()),
-            StructField("event", StringType()),
-            StructField("itemid", StringType()),
-            StructField("categoryid", StringType()),
-            StructField("reward", FloatType()),
-            StructField("item_index", IntegerType()),
-            StructField("user_action_index", IntegerType()),
-        ]
-    )
-
-    train_cols = ["user_history", "return", "item_index"]
-    eval_cols = ["visitorid", "user_history", "item_index_episode", "reward_episode"]
-
     def __init__(
         self,
-        spark: SparkSession,
         data_path: str,
         train: bool,
         split_ratio: float,
+        discount_factor: float,
+        days_in_episode: int,
         category_id: str = None,
         train_item_index_map: pd.DataFrame = None,
-        sequence_length_cutoffs: Tuple[Tuple[int, int], Tuple[int, int]] = (
-            (6, 50),
-            (51, 200),
-        ),
-        n_samples: Tuple[int, int] = (20000, 60000),
-        discount_factor: float = 1e-2,
-        episode_length: int = 7,
     ):
         self.data_path = data_path
 
         self.train = train
         self.split_ratio = split_ratio
 
-        self.cutoffs = sequence_length_cutoffs
-        self.n_samples = n_samples
-        self.sample_seed = randint(0, 9)
-        np.random.seed(self.sample_seed)
-
         self.category_id = category_id
 
         self.discount_factor = discount_factor
-        self.episode_length = episode_length
+        self.days_in_episode = days_in_episode
 
         # 0. Fetch Raw data
         self.events_df = self._get_events_df()
@@ -107,7 +66,14 @@ class RetailrocketDataset(Dataset):
         )
 
         # 3. Build final data
-        self.data = self._build_episodic_data(spark=spark)
+        self.max_unixtime = self.logs.timestamp.max()
+        (
+            self.df,
+            self.lifetime_timestamps_book,
+            self.lifetime_items_book,
+            self.lifetime_user_actions_book,
+            self.lifetime_rewards_book,
+        ) = self._build_data()
 
     def _get_events_df(self) -> pd.DataFrame:
         df = pd.read_csv(
@@ -154,9 +120,12 @@ class RetailrocketDataset(Dataset):
         preprocessed.reset_index(drop=True, inplace=True)
         n_records = preprocessed.shape[0]
         if self.train is True:
-            preprocessed = preprocessed.iloc[: ceil(n_records * self.split_ratio)]
+            n_train = ceil(n_records * self.split_ratio)
+            preprocessed = preprocessed.iloc[:n_train]
         else:
-            preprocessed = preprocessed.iloc[ceil(n_records * (1 - self.split_ratio)) :]
+            n_train = ceil(n_records * (1 - self.split_ratio))
+            preprocessed = preprocessed.iloc[n_train:]
+            preprocessed.reset_index(drop=True, inplace=True)
 
         # 3. Assign reward values
         preprocessed["reward"] = preprocessed.event.map(self.reward_map)
@@ -189,121 +158,105 @@ class RetailrocketDataset(Dataset):
 
         return df
 
-    @staticmethod
-    @udf(FloatType())
-    def _compute_return(rewards: List[float], discount_factor: float) -> float:
-        gammas = (1.0 - discount_factor) ** np.arange(len(rewards))
-        return float(gammas @ np.array(rewards))
-
-    @staticmethod
-    @udf(
-        ArrayType(
-            StructType(
-                [
-                    StructField("item_index", IntegerType()),
-                    StructField("reward", FloatType()),
-                ]
-            )
-        )
-    )
-    def _build_episode(
-        timestamps: List[datetime.datetime],
-        items: List[int],
-        rewards: List[float],
-        length: int,
-        max_time: datetime.datetime,
-    ) -> Optional[List[Dict[str, Union[int, float]]]]:
-        start_time = timestamps.pop(0)
-        end_time = start_time + datetime.timedelta(days=length)
-        if end_time <= max_time:
-            sliced = [{"item_index": items.pop(0), "reward": rewards.pop(0)}]
-            for ts, item_index, reward in zip(timestamps, items, rewards):
-                if ts <= end_time:
-                    sliced.append({"item_index": item_index, "reward": reward})
-                else:
-                    break
-            return sliced
-
-    def _slice_episode(
-        self, followings: List[Dict[str, Union[datetime.datetime, int, float]]]
-    ) -> Optional[Tuple[List[int], List[float]]]:
-        first_event = followings.pop(0)
-        start_time = first_event["timestamp"]
-        end_time = start_time + datetime.timedelta(days=self.episode_length)
-        if end_time <= datetime.datetime.fromtimestamp(
-            self.logs.timestamp.max() / 1000
-        ):
-            item_indices = [first_event["item_index"]]
-            rewards = [first_event["reward"]]
-            for event in followings:
-                if event["timestamp"] <= end_time:
-                    item_indices.append(event["item_index"])
-                    rewards.append(event["reward"])
-                else:
-                    break
-            return item_indices, rewards
-
-    def _build_episodic_data(self, spark: SparkSession) -> pd.DataFrame:
-        index_merged = self.logs.merge(
-            self.item_index_map, on="itemid", how="inner"
-        ).merge(self.user_action_index_map, on=["itemid", "event"], how="inner")
-
-        spark.conf.set("spark.sql.execution.arrow.enabled", "true")
-        sdf = spark.createDataFrame(index_merged, schema=self.spark_schema)
-
-        with_historyNfollowings = (
-            sdf.withColumn(
-                "user_history",
-                collect_list("user_action_index").over(
-                    W.partitionBy("visitorid")
-                    .orderBy("timestamp")
-                    .rowsBetween(W.unboundedPreceding, -1)
-                ),
-            )
-            .filter(size("user_history") > 0)
-            .withColumn(
-                "timestamp", from_unixtime(col("timestamp") / 1000).cast("timestamp")
-            )
-            .withColumn(
-                "followings",
-                collect_list(struct("timestamp", "item_index", "reward")).over(
-                    W.partitionBy("visitorid")
-                    .orderBy("timestamp")
-                    .rowsBetween(W.currentRow, W.unboundedFollowing)
-                ),
-            )
+    def _build_data(
+        self,
+    ) -> Tuple[
+        pd.DataFrame,
+        Dict[str, List[int]],
+        Dict[str, List[int]],
+        Dict[str, List[int]],
+        Dict[str, List[float]],
+    ]:
+        # 1. Merge indices
+        df = self.logs.merge(self.item_index_map, on="itemid", how="inner").merge(
+            self.user_action_index_map, on=["itemid", "event"], how="inner"
         )
 
-        if self.train is True:
-            data = []
-            for row in with_historyNfollowings.select(
-                "user_history", "followings"
-            ).toLocalIterator():
-                episode = self._slice_episode(row.followings)
-                if episode:
-                    item_indices, rewards = episode
-                    gammas = (1.0 - self.discount_factor) ** np.arange(len(rewards))
-                    episodic_return = float(gammas @ np.array(rewards))
-                    data.append([row.user_history, episodic_return, item_indices[0]])
-        else:
-            data = []
-            for row in with_historyNfollowings.select(
-                "visitorid", "user_history", "followings"
-            ).toLocalIterator():
-                episode = self._slice_episode(row.followings)
-                if episode:
-                    item_indices, rewards = episode
-                    data.append(
-                        [row.visitorid, row.user_history, rewards, item_indices]
-                    )
+        # 2. Assign event index within user history
+        df.sort_values(by=["visitorid", "timestamp"], inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        groupedby_user = self.data.groupby(by="visitorid")
+        df["event_index_in_user_history"] = groupedby_user.cumcount()
 
-        return np.array(data, dtype=object)
+        # 3. Build lifetime sequence books by users
+        lifetime_timestamps_book = groupedby_user["timestamp"].apply(list).to_dict()
+        lifetime_items_book = groupedby_user["item_index"].apply(list).to_dict()
+        lifetime_user_actions_book = (
+            groupedby_user["user_action_index"].apply(list).to_dict()
+        )
+        lifetime_rewards_book = groupedby_user["reward"].apply(list).to_dict()
+
+        # 3. Filter insufficient records
+        unixtime_interval = self.days_in_episode * 86400 * 1000
+        df = df[
+            (df["event_index_in_user_history"] > 0)
+            & (df["timestamp"] <= self.max_unixtime - unixtime_interval)
+        ]
+
+        df.reset_index(drop=True, inplace=True)
+
+        return (
+            df,
+            lifetime_timestamps_book,
+            lifetime_items_book,
+            lifetime_user_actions_book,
+            lifetime_rewards_book,
+        )
 
     def __len__(self) -> int:
-        return self.data.shape[0]
+        return self.df.shape[0]
 
-    def __getitem__(self, idx: Union[int, List[int]]) -> np.ndarray:
-        return self.data.iloc[idx]
+    def __getitem__(self, idx: int) -> List[Union[List[int], int, float]]:
+        row = self.data.iloc[idx]
+        user_id = row["visitorid"]
+        index_in_history = row["event_index_in_user_history"]
+
+        user_history = self.lifetime_user_actions_book[user_id][:index_in_history]
+
+        timestamp_followings = self.lifetime_timestamps_book[user_id][index_in_history:]
+        reward_followings = self.lifetime_rewards_book[user_id][index_in_history:]
+
+        reward_episode = self._slice_episode(
+            followings=reward_followings, timestamps=timestamp_followings
+        )
+        episodic_return = self._compute_return(rewards=reward_episode)
+
+        if self.train is True:
+            return [
+                user_history,
+                row["item_index"],
+                episodic_return,
+            ]
+        else:
+            item_followings = self.lifetime_items_book[user_id][index_in_history:]
+            item_episode = self._slice_episode(
+                followings=item_followings, timestamps=timestamp_followings
+            )
+            return [
+                user_id,
+                user_history,
+                item_episode,
+                reward_episode,
+                episodic_return,
+            ]
+
+    def _slice_episode(self, followings: List[float], timestamps: List[int]) -> float:
+        episode_length = self._get_episode_length(timestamps=timestamps)
+        return followings[:episode_length]
+
+    def _compute_return(self, rewards: List[float]) -> float:
+        gammas = (1.0 - self.discount_factor) ** np.arange(len(rewards))
+        return gammas @ np.array(rewards)
+
+    def _get_episode_length(self, timestamps: List[int]) -> int:
+        end_unixtime = timestamps[0] + (self.days_in_episode * 86400 * 1000)
+        length = 1
+        for ts in timestamps[1:]:
+            if ts <= end_unixtime:
+                length += 1
+            else:
+                break
+        return length
 
 
 class RetailrocketDataLoader(DataLoader):
@@ -345,7 +298,7 @@ class RetailrocketDataLoader(DataLoader):
         ],
     ]:
         batch_size = len(batch)
-        user_history, _return, item_index = tuple(np.array(batch, dtype=object).T)
+        user_history, item_index, _return = tuple(np.array(batch, dtype=object).T)
 
         padded_user_history, lengths = self.pad_sequence(user_history)
         sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
@@ -355,10 +308,10 @@ class RetailrocketDataLoader(DataLoader):
                 data=padded_user_history[sorted_idx],
                 lengths=sorted_lengths,
             ),
-            "return": torch.from_numpy(_return.astype(np.float32)).view(batch_size, -1),
             "item_index": torch.from_numpy(item_index.astype(np.int64)).view(
                 batch_size, -1
             ),
+            "return": torch.from_numpy(_return.astype(np.float32)).view(batch_size, -1),
         }
 
     def eval_collate_func(
@@ -372,7 +325,7 @@ class RetailrocketDataLoader(DataLoader):
             List[List[float]],
         ],
     ]:
-        user_id, user_history, item_index_episode, reward_episode = tuple(
+        user_id, user_history, item_index_episode, reward_episode, _return = tuple(
             np.array(batch, dtype=object).T
         )
 
@@ -387,6 +340,7 @@ class RetailrocketDataLoader(DataLoader):
             ),
             "item_index_episode": list(item_index_episode),
             "reward_episode": list(reward_episode),
+            "return": torch.from_numpy(_return.astype(np.float32)).view(len(batch), -1),
         }
 
     def to(self, batch: Dict, device: torch.device) -> Dict:
