@@ -188,12 +188,13 @@ class TopKOfflineREINFORCE(nn.Module):
 
     def get_corrected_return(
         self,
-        state: torch.FloatTensor,
+        action_state: torch.FloatTensor,
+        beta_state: torch.FloatTensor,
         item_index: torch.LongTensor,
         episodic_return: torch.FloatTensor,
         behavior_policy: SoftmaxStochasticPolicy,
     ) -> torch.FloatTensor:
-        action_policy_prob = torch.exp(self.action_policy(state, item_index))
-        behavior_policy_prob = torch.exp(behavior_policy(state, item_index))
+        action_policy_prob = torch.exp(self.action_policy(action_state, item_index))
+        behavior_policy_prob = torch.exp(behavior_policy(beta_state, item_index))
         importance_weight = torch.div(action_policy_prob, behavior_policy_prob)
         return torch.mul(importance_weight, episodic_return)
