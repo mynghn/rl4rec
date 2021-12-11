@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -17,8 +17,8 @@ class TopKOfflineREINFORCE(nn.Module):
         behavior_policy: SoftmaxStochasticPolicy,
         action_policy_optimizer: Optimizer,
         behavior_policy_optimizer: Optimizer,
-        K: int,
         weight_cap: float,
+        K: int,
     ):
         super(TopKOfflineREINFORCE, self).__init__()
 
@@ -26,9 +26,8 @@ class TopKOfflineREINFORCE(nn.Module):
         self.action_policy = action_policy
         self.behavior_policy = behavior_policy
 
-        self.K = K
-
         self.weight_cap = weight_cap
+        self.K = K
 
         if self.behavior_policy.adaptive_softmax is False:
             self.kl_div_loss = KLDivLoss(reduction="batchmean")
@@ -115,12 +114,11 @@ class TopKOfflineREINFORCE(nn.Module):
         self.action_policy_optimizer.step()
         self.behavior_policy_optimizer.step()
 
-    def recommend(
-        self, state: torch.FloatTensor
-    ) -> Tuple[List[torch.LongTensor], List[torch.FloatTensor]]:
+    def get_top_recommendations(
+        self, state: torch.FloatTensor, M: int
+    ) -> Tuple[torch.LongTensor, torch.FloatTensor]:
         if self.action_policy.adaptive_softmax is True:
-            log_action_policy_probs = self.action_policy.log_probs(state)
-            action_policy_probs = torch.exp(log_action_policy_probs)
+            action_policy_probs = torch.exp(self.action_policy.log_probs(state))
         else:
             assert state.size(-1) == self.action_policy.item_embeddings.weight.size(
                 -1
@@ -137,10 +135,28 @@ class TopKOfflineREINFORCE(nn.Module):
             action_policy_probs = self.action_policy.softmax(logits)
 
         sorted_indices = action_policy_probs.argsort(dim=1, descending=True)
-        indexed_items = sorted_indices[:, : self.K]
-        logits = torch.gather(input=action_policy_probs, dim=1, index=indexed_items)
+        items = sorted_indices[:, :M]
+        probs = torch.gather(input=action_policy_probs, dim=1, index=items)
 
-        return list(indexed_items), list(logits)
+        return items, probs
+
+    def recommend(
+        self, state: torch.FloatTensor, M: int, K_prime: int
+    ) -> torch.LongTensor:
+        ordered_item_pool, probs = self.get_top_recommendations(state=state, M=M)
+        if K_prime > 0:
+            fixed = ordered_item_pool[:, :K_prime]
+            sub_item_pool = ordered_item_pool[:, K_prime:]
+            sub_probs = probs[:, K_prime:]
+            sampled = sub_item_pool[
+                sub_probs.multinomial(num_samples=self.K - K_prime, replacement=False)
+            ]
+            recommendations = torch.cat((fixed, sampled), dim=1)
+        else:
+            recommendations = ordered_item_pool[
+                probs.multinomial(num_samples=self.K, replacement=False)
+            ]
+        return recommendations
 
     def to(self, device: torch.device):
         if self.action_policy.adaptive_softmax is True:
@@ -154,3 +170,15 @@ class TopKOfflineREINFORCE(nn.Module):
                 on_device.behavior_policy.item_space.to(device)
             )
             return on_device
+
+    def get_corrected_return(
+        self,
+        state: torch.FloatTensor,
+        item_index: torch.LongTensor,
+        episodic_return: torch.FloatTensor,
+        behavior_policy: SoftmaxStochasticPolicy,
+    ) -> torch.FloatTensor:
+        action_policy_prob = torch.exp(self.action_policy(state, item_index))
+        behavior_policy_prob = torch.exp(behavior_policy(state, item_index))
+        importance_weight = torch.div(action_policy_prob, behavior_policy_prob)
+        return torch.mul(importance_weight, episodic_return)
