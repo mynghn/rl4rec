@@ -4,7 +4,6 @@ from typing import DefaultDict, Dict, List
 import numpy as np
 import torch
 from dataset.retailrocket import RetailrocketDataLoader
-from model.policy import SoftmaxStochasticPolicy
 from tqdm import tqdm
 
 from ..model.agent import TopKOfflineREINFORCE
@@ -12,16 +11,13 @@ from ..model.agent import TopKOfflineREINFORCE
 
 def evaluate_agent(
     agent: TopKOfflineREINFORCE,
-    eval_behavior_policy: SoftmaxStochasticPolicy,
     eval_loader: RetailrocketDataLoader,
     discount_factor: float,
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
 ) -> Dict[str, float]:
     agent = agent.to(device)
-    eval_behavior_policy = eval_behavior_policy.to(device)
     agent.eval()
-    eval_behavior_policy.eval()
 
     expected_return_cumulative = 0.0
     precision_cumulatvie = 0.0
@@ -37,7 +33,12 @@ def evaluate_agent(
             batch = eval_loader.to(batch=batch, device=device)
             batch_size = len(batch["user_id"])
 
-            state = agent.state_network(
+            beta_state = agent.beta_state_network(
+                user_history=batch["user_history"],
+                user_feature_index=batch.get("user_feature_index"),
+                item_feature_index=batch.get("item_feature_index"),
+            )
+            pi_state = agent.pi_state_network(
                 user_history=batch["user_history"],
                 user_feature_index=batch.get("user_feature_index"),
                 item_feature_index=batch.get("item_feature_index"),
@@ -48,15 +49,17 @@ def evaluate_agent(
                 [seq[0] for seq in batch["item_index_episode"]]
             ).view(batch_size, -1)
             corrected_return = agent.get_corrected_return(
-                state=state,
+                beta_state=beta_state,
+                pi_state=pi_state,
                 item_index=item_index_tensor,
                 episodic_return=batch["return"],
-                behavior_policy=eval_behavior_policy,
             )
             expected_return_cumulative += corrected_return.sum().cpu().item()
 
             # 2. Compute metrics from traditional RecSys domain
-            recommended_item_indices, _ = agent.get_top_recommendations(state, agent.K)
+            recommended_item_indices, _ = agent.get_top_recommendations(
+                state=pi_state, M=agent.K
+            )
 
             for user_id, actual_seq, reward_seq, recommendations in zip(
                 batch["user_id"],
@@ -142,8 +145,3 @@ def build_relevance_book(
         relevance_book[item_index] += reward * gamma
 
     return relevance_book
-
-
-def compute_return(rewards: List[float], discount_factor: float) -> float:
-    gammas = (1.0 - discount_factor) ** np.arange(len(rewards))
-    return float(gammas @ np.array(rewards))
