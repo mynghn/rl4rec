@@ -118,7 +118,7 @@ class CIKIM19Dataset(Dataset):
             self.item_index_map = self._build_item_index_map()
         else:
             assert (
-                train_item_index_map
+                train_item_index_map is not None
             ), "Item-index mapping from train sequence should be provided for evaluation dataset."
             self.item_index_map = train_item_index_map
         self.user_action_index_map = self._build_user_action_index_map(
