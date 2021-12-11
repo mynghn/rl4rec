@@ -1,133 +1,159 @@
 from collections import defaultdict
 from typing import DefaultDict, Dict, List
 
+import numpy as np
 import torch
+from dataset.retailrocket import RetailrocketDataLoader
+from model.policy import SoftmaxStochasticPolicy
 from tqdm import tqdm
 
-from ..dataset.cikim19 import CIKIM19DataLoader
 from ..model.agent import TopKOfflineREINFORCE
 
 
 def evaluate_agent(
     agent: TopKOfflineREINFORCE,
-    eval_loader: CIKIM19DataLoader,
+    eval_behavior_policy: SoftmaxStochasticPolicy,
+    eval_loader: RetailrocketDataLoader,
+    discount_factor: float,
     device: torch.device = torch.device("cpu"),
-    debug: bool = True,
+    debug: bool = False,
 ) -> Dict[str, float]:
-    K = agent.K
+    agent = agent.to(device)
+    eval_behavior_policy = eval_behavior_policy.to(device)
+    agent.eval()
+    eval_behavior_policy.eval()
+
+    expected_return = 0.0
+
     precision_log = []
     recall_log = []
     ndcg_log = []
-    cnt = 0
     hit = 0
-    users_total = set()
     users_hit = set()
 
-    agent = agent.to(device)
+    epoch_cnt = 0
+    iter_cnt = 0
+    users_total = set()
+    with torch.no_grad():
+        for batch in tqdm(eval_loader, desc="eval"):
+            batch = eval_loader.to(batch=batch, device=device)
 
-    agent.eval()
-    for batch_dict in tqdm(eval_loader, desc="eval"):
-        batch_dict = eval_loader.to(batch=batch_dict, device=device)
-
-        if (
-            agent.state_network.user_feature_enabled
-            and agent.state_network.item_feature_enabled
-        ):
             state = agent.state_network(
-                user_history=batch_dict["user_history"],
-                user_feature_index=batch_dict.get("user_feature_index"),
-                item_feature_index=batch_dict.get("item_feature_index"),
-            )
-        elif agent.state_network.user_feature_enabled:
-            state = agent.state_network(
-                user_history=batch_dict["user_history"],
-                user_feature_index=batch_dict.get("user_feature_index"),
-            )
-        elif agent.state_network.item_feature_enabled:
-            state = agent.state_network(
-                user_history=batch_dict["user_history"],
-                item_feature_index=batch_dict.get("item_feature_index"),
-            )
-        else:
-            state = agent.state_network(user_history=batch_dict["user_history"])
-
-        recommended_item_indices, _ = agent.recommend(state)
-
-        for user_id, actual_seq, reward_seq, recommendations in zip(
-            batch_dict["user_id"],
-            batch_dict["item_index_episode"],
-            batch_dict["reward_episode"],
-            recommended_item_indices,
-        ):
-            actual_item_set = set(actual_seq)
-            recommendation_set = set(recommendations.tolist())
-
-            intersections = actual_item_set & recommendation_set
-            n_intersections = len(intersections)
-            if n_intersections > 0:
-                hit += 1
-                users_hit.add(user_id)
-
-            precision = n_intersections / len(recommendation_set)
-            recall = n_intersections / len(actual_item_set)
-            ndcg = compute_ndcg(
-                recommendations=recommendations,
-                relevance_book=build_relevance_book(
-                    item_sequence=actual_seq, reward_sequence=reward_seq
-                ),
+                user_history=batch["user_history"],
+                user_feature_index=batch.get("user_feature_index"),
+                item_feature_index=batch.get("item_feature_index"),
             )
 
-            precision_log.append(precision)
-            recall_log.append(recall)
-            ndcg_log.append(ndcg)
+            # 1. Expected return of Agent's policy over samples from eval data behavior policy
+            item_index_tensor = torch.LongTensor(
+                [seq[0] for seq in batch["item_index_episode"]]
+            ).view(eval_loader.batch_size, -1)
+            episodic_return_tensor = torch.FloatTensor(
+                [
+                    compute_return(rewards=seq, discount_factor=discount_factor)
+                    for seq in batch["reward_episode"]
+                ]
+            ).view(eval_loader.batch_size, -1)
+            corrected_return = agent.get_corrected_return(
+                state=state,
+                item_index=item_index_tensor,
+                episodic_return=episodic_return_tensor,
+                behavior_policy=eval_behavior_policy,
+            )
+            expected_return += corrected_return.mean().cpu().item()
 
-            if debug:
-                print(f"User: {user_id}")
-                print(f"1. Precision: {precision:2.%}")
-                print(f"1. Recall: {recall:2.%}")
-                print(f"1. nDCG: {ndcg:2.%}")
-                print("=" * 20)
+            # 2. Compute metrics from traditional RecSys domain
+            recommended_item_indices, _ = agent.get_top_recommendations(state, agent.K)
 
-        cnt += eval_loader.batch_size
-        users_total |= set(user_id)
+            for user_id, actual_seq, reward_seq, recommendations in zip(
+                batch["user_id"],
+                batch["item_index_episode"],
+                batch["reward_episode"],
+                recommended_item_indices,
+            ):
+                recommendation_list = recommendations.tolist()
+
+                actual_item_set = set(actual_seq)
+                recommendation_set = set(recommendation_list)
+
+                intersections = actual_item_set & recommendation_set
+                TP = len(intersections)
+                if TP > 0:
+                    hit += 1
+                    users_hit.add(user_id)
+
+                precision = TP / len(recommendation_set)
+                recall = TP / len(actual_item_set)
+                ndcg = compute_ndcg(
+                    recommendations=recommendation_list,
+                    relevance_book=build_relevance_book(
+                        item_sequence=actual_seq,
+                        reward_sequence=reward_seq,
+                        discount_factor=discount_factor,
+                    ),
+                )
+
+                precision_log.append(precision)
+                recall_log.append(recall)
+                ndcg_log.append(ndcg)
+
+                if debug:
+                    print(f"User: {user_id}")
+                    print(f"1. Precision: {precision:2.%}")
+                    print(f"1. Recall: {recall:2.%}")
+                    print(f"1. nDCG: {ndcg:2.%}")
+                    print("=" * 20)
+
+            epoch_cnt += 1
+            iter_cnt += eval_loader.batch_size
+            users_total |= set(batch["user_id"])
 
     return {
-        f"Precision at {K}": sum(precision_log) / cnt,
-        f"Recall at {K}": sum(recall_log) / cnt,
-        f"nDCG at {K}": sum(ndcg_log) / cnt,
-        "Hit Rate": hit / cnt,
+        "E[Return]": expected_return / epoch_cnt,
+        f"Precision at {agent.K}": sum(precision_log) / iter_cnt,
+        f"Recall at {agent.K}": sum(recall_log) / iter_cnt,
+        f"nDCG at {agent.K}": sum(ndcg_log) / iter_cnt,
+        "Hit Rate": hit / iter_cnt,
         "User Hit Rate": len(users_hit) / len(users_total),
     }
 
 
 def compute_ndcg(
-    recommendations: torch.LongTensor, relevance_book: DefaultDict[int, float]
+    recommendations: List[int], relevance_book: DefaultDict[int, float]
 ) -> float:
-    sorted_relevance = torch.FloatTensor(sorted(relevance_book.values(), reverse=True))
+    K = len(recommendations)
+    coefs = torch.ones(K) / torch.arange(2, K + 2).log2()
 
-    n_items = len(sorted_relevance)
-    _coefs = torch.ones(n_items) / torch.arange(2, n_items + 2).log2()
-    idcg = (_coefs @ sorted_relevance).item()
+    sorted_relevance_by_K = torch.FloatTensor(
+        sorted(relevance_book.values(), reverse=True)[:K]
+    )
+    idcg = (coefs @ sorted_relevance_by_K).item()
 
     recommended_relevance = torch.FloatTensor(
-        [relevance_book[item_idx.item()] for item_idx in recommendations]
+        [relevance_book[item_idx] for item_idx in recommendations]
     )
-    K = len(recommendations)
-    _coefs = torch.ones(K) / torch.arange(2, K + 2).log2()
-    dcg = (_coefs @ recommended_relevance).item()
+    dcg = (coefs @ recommended_relevance).item()
 
-    return dcg / idcg if idcg > 0 else 0.0
+    ndcg = dcg / idcg if idcg > 0 else 0.0
+
+    return ndcg
 
 
 def build_relevance_book(
-    item_sequence: List[int], reward_sequence: List[float]
+    item_sequence: List[int], reward_sequence: List[float], discount_factor: float
 ) -> DefaultDict[int, float]:
     assert len(item_sequence) == len(
         reward_sequence
     ), "Item and reward sequence length should match."
 
+    gammas = (1.0 - discount_factor) ** np.arange(len(item_sequence))
     relevance_book = defaultdict(float)
-    for item_indexed, reward in zip(item_sequence, reward_sequence):
-        relevance_book[item_indexed] += reward
+    for gamma, item_index, reward in zip(gammas, item_sequence, reward_sequence):
+        relevance_book[item_index] += reward * gamma
 
     return relevance_book
+
+
+def compute_return(rewards: List[float], discount_factor: float) -> float:
+    gammas = (1.0 - discount_factor) ** np.arange(len(rewards))
+    return float(gammas @ np.array(rewards))
