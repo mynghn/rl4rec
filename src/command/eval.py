@@ -48,7 +48,7 @@ def evaluate_agent(
                 item_feature_index=batch.get("item_feature_index"),
             )
 
-            # 1. Expected return of Agent's policy over samples from eval data behavior policy
+            # 1. Expected return of Agent's policy over samples from eval data that follows behavior policy
             item_index_tensor = (
                 torch.LongTensor([seq[0] for seq in batch["item_index_episode"]])
                 .view(batch_size, -1)
