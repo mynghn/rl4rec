@@ -20,10 +20,9 @@ from pyspark.sql.functions import (
 )
 from pyspark.sql.types import FloatType, StructField, StructType
 
-from model.agent import TopKOfflineREINFORCE
-
 from ..command.eval import build_relevance_book, compute_ndcg
 from ..dataset.retailrocket import RetailrocketDataset
+from ..model.agent import TopKOfflineREINFORCE
 
 
 class JaccardSimilarity:
