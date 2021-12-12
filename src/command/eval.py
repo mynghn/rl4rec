@@ -3,6 +3,7 @@ from typing import DefaultDict, Dict, List
 
 import numpy as np
 import torch
+from torch.nn.modules.loss import KLDivLoss
 from tqdm import tqdm
 
 from ..dataset.retailrocket import RetailrocketDataLoader
@@ -19,7 +20,10 @@ def evaluate_agent(
     agent = agent.to(device)
     agent.eval()
 
+    kl_div_loss = KLDivLoss(reduction="sum", log_target=True)
+
     expected_return_cumulative = 0.0
+    kl_div_sum = 0.0
     precision_cumulatvie = 0.0
     recall_cumulative = 0.0
     ndcg_cumulative = 0.0
@@ -56,7 +60,15 @@ def evaluate_agent(
             )
             expected_return_cumulative += corrected_return.sum().cpu().item()
 
-            # 2. Compute metrics from traditional RecSys domain
+            # 2. KL Divergence between Agent's policy & former behavior policy
+            log_action_policy_probs = agent.action_policy.log_probs(pi_state)
+            log_behavior_policy_probs = agent.behavior_policy.log_probs(beta_state)
+
+            kl_div_sum += kl_div_loss(
+                log_action_policy_probs, log_behavior_policy_probs
+            )
+
+            # 3. Compute metrics from traditional RecSys domain
             recommended_item_indices, _ = agent.get_top_recommendations(
                 state=pi_state, M=agent.K
             )
@@ -103,6 +115,7 @@ def evaluate_agent(
 
     return {
         "E[Return]": expected_return_cumulative / iter_cnt,
+        "KL-Divergence(Pi|Beta)": kl_div_sum / iter_cnt,
         f"Precision at {agent.K}": precision_cumulatvie / iter_cnt,
         f"Recall at {agent.K}": recall_cumulative / iter_cnt,
         f"nDCG at {agent.K}": ndcg_cumulative / iter_cnt,
