@@ -3,9 +3,9 @@ from typing import DefaultDict, Dict, List
 
 import numpy as np
 import torch
-from dataset.retailrocket import RetailrocketDataLoader
 from tqdm import tqdm
 
+from ..dataset.retailrocket import RetailrocketDataLoader
 from ..model.agent import TopKOfflineREINFORCE
 
 
