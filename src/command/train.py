@@ -60,6 +60,7 @@ def train_agent(
     # 2. Train action policy
     action_policy_loss_log = []
     agent.beta_state_network.eval()
+    agent.behavior_policy.eval()
     for epoch in range(1, n_epochs_pi + 1):
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         print(f"\nEpoch {epoch} for action policy train\nstarted at: {start_time}\n")
