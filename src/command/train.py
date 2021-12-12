@@ -1,5 +1,5 @@
 import time
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import torch
 from tqdm import tqdm
@@ -11,16 +11,25 @@ from ..model.agent import TopKOfflineREINFORCE
 def train_agent(
     agent: TopKOfflineREINFORCE,
     train_loader: RetailrocketDataLoader,
-    n_epochs: int,
+    n_epochs: Union[int, Tuple[int]],
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
 ) -> Optional[Tuple[List[float], List[float]]]:
     agent = agent.to(device)
     agent.train()
 
+    if isinstance(n_epochs, int):
+        n_epochs_beta = n_epochs_pi = n_epochs
+    elif isinstance(n_epochs, tuple):
+        n_epochs_beta, n_epochs_pi = n_epochs
+    else:
+        raise TypeError(
+            f"Unregistered {type(n_epochs)} type n_epochs entered.: {n_epochs}"
+        )
+
     # 1. Train behavior policy first
     behavior_policy_loss_log = []
-    for epoch in range(1, n_epochs + 1):
+    for epoch in range(1, n_epochs_beta + 1):
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         print(f"\nEpoch {epoch} for behavior policy train\nstarted at: {start_time}\n")
 
@@ -51,7 +60,7 @@ def train_agent(
     # 2. Train action policy
     action_policy_loss_log = []
     agent.beta_state_network.eval()
-    for epoch in range(1, n_epochs + 1):
+    for epoch in range(1, n_epochs_pi + 1):
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         print(f"\nEpoch {epoch} for action policy train\nstarted at: {start_time}\n")
 
