@@ -49,9 +49,11 @@ def evaluate_agent(
             )
 
             # 1. Expected return of Agent's policy over samples from eval data behavior policy
-            item_index_tensor = torch.LongTensor(
-                [seq[0] for seq in batch["item_index_episode"]]
-            ).view(batch_size, -1)
+            item_index_tensor = (
+                torch.LongTensor([seq[0] for seq in batch["item_index_episode"]])
+                .view(batch_size, -1)
+                .to(device)
+            )
             corrected_return = agent.get_corrected_return(
                 beta_state=beta_state,
                 pi_state=pi_state,
@@ -133,11 +135,17 @@ def compute_ndcg(
     sorted_relevance_by_K = torch.FloatTensor(
         sorted(relevance_book.values(), reverse=True)[:K]
     )
+    if sorted_relevance_by_K.size(0) < K:
+        _pad = torch.zeros(K - sorted_relevance_by_K.size(0))
+        sorted_relevance_by_K = torch.cat((sorted_relevance_by_K, _pad))
     idcg = (coefs @ sorted_relevance_by_K).item()
 
     recommended_relevance = torch.FloatTensor(
         [relevance_book[item_idx] for item_idx in recommendations]
     )
+    if recommended_relevance.size(0) < K:
+        _pad = torch.zeros(K - recommended_relevance.size(0))
+        recommended_relevance = torch.cat((recommended_relevance, _pad))
     dcg = (coefs @ recommended_relevance).item()
 
     ndcg = dcg / idcg if idcg > 0 else 0.0
