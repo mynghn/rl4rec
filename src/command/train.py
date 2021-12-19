@@ -2,6 +2,7 @@ import time
 from typing import List, Optional, Tuple, Union
 
 import torch
+from torch.optim import Adam
 from torch.optim.optimizer import Optimizer
 from tqdm import tqdm
 
@@ -106,14 +107,14 @@ def train_agent(
 
 def train_GRU4Rec(
     model: GRU4Rec,
-    optimizer: Optimizer,
     train_loader: Retailrocket4GRU4RecLoader,
     n_epochs: int,
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
 ) -> Optional[Tuple[List[float], List[float]]]:
-    model = model.to(device)
     model.train()
+    model = model.to(device)
+    optimizer = Adam(model.parameters())
 
     train_loss_log = []
     for epoch in range(1, n_epochs + 1):
