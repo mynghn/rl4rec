@@ -310,7 +310,7 @@ class RetailrocketDataLoader(DataLoader):
 
 
 class Retailrocket4GRU4RecLoader(DataLoader):
-    non_tensors = ["items_appeared"]
+    non_tensors = ("items_appeared", "current_item_indices")
 
     def __init__(
         self, train: bool, dataset: RetailrocketEpisodeDataset, *args, **kargs
@@ -366,13 +366,12 @@ class Retailrocket4GRU4RecLoader(DataLoader):
 
     def train_collate_func(
         self, batch: List[np.ndarray]
-    ) -> Dict[str, Union[PackedSequence, torch.LongTensor, Set[int]]]:
+    ) -> Dict[str, Union[PackedSequence, List[int], Set[int]]]:
         _, item_episodes, reward_episodes = tuple(np.array(batch, dtype=object).T)
 
         item_histories, reward_histories, current_items = self.slice_n_explode(
             item_episodes, reward_episodes
         )
-        batch_size = len(current_items)
 
         histories_encoded = [
             self.n_hot_encode(
@@ -390,9 +389,7 @@ class Retailrocket4GRU4RecLoader(DataLoader):
                 lengths=sorted_lengths,
                 batch_first=True,
             ),
-            "current_item_indices": torch.LongTensor(current_items)[sorted_idx].view(
-                batch_size, -1
-            ),
+            "current_item_indices": list(np.array(current_items)[sorted_idx]),
             "items_appeared": set(chain(*item_episodes)),
         }
 
