@@ -55,7 +55,7 @@ class GRU4Rec(nn.Module):
         return out
 
     # Implement TOP1 loss from the paper
-    def loss(
+    def top1_loss(
         self, other_logits: torch.FloatTensor, relevant_logit: torch.FloatTensor
     ) -> torch.FloatTensor:
         return torch.mean(
