@@ -1,13 +1,16 @@
 import os
+from itertools import chain
 from math import ceil
-from typing import Any, Dict, List, Sequence, Tuple, Union
+from typing import Any, Dict, List, Sequence, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import torch
+from torch.nn.functional import one_hot
+from torch.nn.utils.rnn import PackedSequence, pack_padded_sequence
 from torch.utils.data import DataLoader, Dataset
 
-from .custom_typings import PaddedNSortedUserHistoryBatch
+from .custom_typings import PaddedNSortedEpisodeBatch
 
 
 class RetailrocketEpisodeDataset(Dataset):
@@ -31,7 +34,6 @@ class RetailrocketEpisodeDataset(Dataset):
         data_path: str,
         train: bool,
         split_ratio: float,
-        discount_factor: float,
         interval_hours_in_episode: int = 24,
         item_space_size: int = None,
         category_id: str = None,
@@ -44,7 +46,6 @@ class RetailrocketEpisodeDataset(Dataset):
 
         self.category_id = category_id
 
-        self.discount_factor = discount_factor
         self.interval_hours_in_episode = interval_hours_in_episode
         self.item_space_size = item_space_size
 
@@ -162,9 +163,7 @@ class RetailrocketEpisodeDataset(Dataset):
         Dict[str, List[int]],
     ]:
         # 1. Merge indices
-        df = self.logs.merge(self.item_index_map, on="itemid", how="inner").merge(
-            self.user_action_index_map, on=["itemid", "event"], how="inner"
-        )
+        df = self.logs.merge(self.item_index_map, on="itemid", how="inner")
 
         # 2. Assign event index within user history
         df.sort_values(by=["visitorid", "timestamp"], inplace=True)
@@ -242,7 +241,7 @@ class RetailrocketDataLoader(DataLoader):
     ) -> Dict[
         str,
         Union[
-            PaddedNSortedUserHistoryBatch,
+            PaddedNSortedEpisodeBatch,
             torch.LongTensor,
             torch.FloatTensor,
         ],
@@ -254,7 +253,7 @@ class RetailrocketDataLoader(DataLoader):
         sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
 
         return {
-            "user_history": PaddedNSortedUserHistoryBatch(
+            "user_history": PaddedNSortedEpisodeBatch(
                 data=padded_user_history[sorted_idx],
                 lengths=sorted_lengths,
             ),
@@ -272,7 +271,7 @@ class RetailrocketDataLoader(DataLoader):
         str,
         Union[
             List[str],
-            PaddedNSortedUserHistoryBatch,
+            PaddedNSortedEpisodeBatch,
             List[List[int]],
             List[List[float]],
         ],
@@ -286,7 +285,7 @@ class RetailrocketDataLoader(DataLoader):
 
         return {
             "user_id": list(user_id[sorted_idx]),
-            "user_history": PaddedNSortedUserHistoryBatch(
+            "user_history": PaddedNSortedEpisodeBatch(
                 data=padded_user_history[sorted_idx],
                 lengths=sorted_lengths,
             ),
@@ -308,3 +307,112 @@ class RetailrocketDataLoader(DataLoader):
             for k in non_tensors:
                 batch_on_device[k] = batch[k]
             return batch_on_device
+
+
+class Retailrocket4GRU4RecLoader(DataLoader):
+    non_tensors = "items_appeared"
+
+    def __init__(
+        self, train: bool, dataset: RetailrocketEpisodeDataset, *args, **kargs
+    ):
+        self.dataset = dataset
+        self.n_items = dataset.item_index_map.shape[0]
+        self.train = train
+        if self.train is True:
+            super().__init__(
+                dataset=self.dataset, collate_fn=self.train_collate_func, *args, **kargs
+            )
+        else:
+            super().__init__(
+                dataset=self.dataset, collate_fn=self.eval_collate_func, *args, **kargs
+            )
+
+    def backpad_sequence(
+        self, sequences: Sequence[torch.FloatTensor]
+    ) -> Tuple[torch.FloatTensor, torch.LongTensor]:
+        lengths = torch.LongTensor([seq.size(0) for seq in sequences])
+        max_length = lengths.max()
+        padded = torch.stack(
+            [
+                torch.cat(
+                    [seq, torch.zeros(max_length - seq.size(0), seq.size(1))]
+                ).float()
+                for seq in sequences
+            ]
+        )
+        return padded, lengths
+
+    def slice_n_explode(
+        self,
+        item_episodes: Sequence[Sequence[int]],
+        reward_episodes: Sequence[Sequence[int]],
+    ) -> Tuple[List[List[int]], List[List[int]], List[int]]:
+        item_histories = []
+        reward_histories = []
+        current_items = []
+        for item_ep, reward_ep in zip(item_episodes, reward_episodes):
+            for idx in range(1, len(item_ep)):
+                item_histories.append(item_ep[:idx])
+                reward_histories.append(reward_ep[:idx])
+                current_items.append(item_ep[idx])
+        return item_histories, reward_histories, current_items
+
+    def n_hot_encode(
+        self, item_seq: torch.LongTensor, reward_seq: torch.FloatTensor
+    ) -> torch.FloatTensor:
+        encoded = one_hot(item_seq, num_classes=self.n_items)
+        encoded = encoded * reward_seq.unsqueeze(1).expand(-1, encoded.size(1))
+        return encoded
+
+    def train_collate_func(
+        self, batch: List[np.ndarray]
+    ) -> Dict[str, Union[PackedSequence, torch.LongTensor, Set[int]]]:
+        _, item_episodes, reward_episodes = tuple(np.array(batch, dtype=object).T)
+
+        item_histories, reward_histories, current_items = self.slice_n_explode(
+            item_episodes, reward_episodes
+        )
+        batch_size = len(current_items)
+
+        histories_encoded = [
+            self.n_hot_encode(
+                torch.LongTensor(item_hist), torch.FloatTensor(reward_hist)
+            )
+            for item_hist, reward_hist in zip(item_histories, reward_histories)
+        ]
+
+        padded_histories, lengths = self.backpad_sequence(histories_encoded)
+        sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
+
+        return {
+            "pack_padded_histories": pack_padded_sequence(
+                input=padded_histories[sorted_idx],
+                lengths=sorted_lengths,
+                batch_first=True,
+            ),
+            "current_item_indices": torch.LongTensor(current_items)[sorted_idx].view(
+                batch_size, -1
+            ),
+            "items_appeared": set(chain(*item_episodes)),
+        }
+
+    def eval_collate_func(
+        self, batch: List[np.ndarray]
+    ) -> Dict[
+        str,
+        Union[
+            List[str],
+            PaddedNSortedEpisodeBatch,
+            List[List[int]],
+            List[List[float]],
+        ],
+    ]:
+        pass
+
+    def to(self, batch: Dict, device: torch.device) -> Dict:
+        batch_on_device = {
+            k: v.to(device) for k, v in batch.items() if k not in self.non_tensors
+        }
+        for k in self.non_tensors:
+            batch_on_device[k] = batch[k]
+        return batch_on_device
