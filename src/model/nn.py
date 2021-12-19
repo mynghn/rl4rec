@@ -1,29 +1,36 @@
 import torch
 import torch.nn as nn
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-
-from ..dataset.custom_typings import PaddedNSortedUserHistoryBatch
+from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence
 
 
 class StateTransitionNetwork(nn.Module):
     def __init__(
         self,
-        n_user_actions: int,
-        user_action_embedding_dim: int,
+        n_items: int,
         hidden_size: int,
-        padding_singal: int,
         num_layers: int,
         dropout: int,
+        user_action_embedding_dim: int = -1,
+        n_actions: int = None,
+        padding_singal: int = None,
     ):
         super(StateTransitionNetwork, self).__init__()
         self.padding_signal = padding_singal
-        self.user_action_embeddings = nn.Embedding(
-            num_embeddings=n_user_actions + 1,
-            embedding_dim=user_action_embedding_dim,
-            padding_idx=-1,
-        )
+
+        self.n_items = n_items
+
+        if user_action_embedding_dim > 0:
+            self.user_action_embeddings = nn.Embedding(
+                num_embeddings=n_items * n_actions + 1,
+                embedding_dim=user_action_embedding_dim,
+                padding_idx=-1,
+            )
+            rnn_input_size = user_action_embedding_dim
+        else:
+            rnn_input_size = n_items
+
         self.rnn = nn.GRU(
-            input_size=user_action_embedding_dim,
+            input_size=rnn_input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             dropout=dropout,
@@ -31,19 +38,8 @@ class StateTransitionNetwork(nn.Module):
             batch_first=True,
         )
 
-    def forward(self, user_history: PaddedNSortedUserHistoryBatch) -> torch.FloatTensor:
-        padding_idx_replaced = user_history.data.masked_fill(
-            user_history.data == self.padding_signal,
-            self.user_action_embeddings.padding_idx,
-        )
-        user_history_embedded = self.user_action_embeddings(padding_idx_replaced)
-        user_history_packedNembedded = pack_padded_sequence(
-            input=user_history_embedded,
-            lengths=user_history.lengths,
-            batch_first=True,
-        )
-
-        packed_output, _ = self.rnn(input=user_history_packedNembedded)
+    def forward(self, pack_padded_histories: PackedSequence) -> torch.FloatTensor:
+        packed_output, _ = self.rnn(input=pack_padded_histories)
         output, lengths = pad_packed_sequence(sequence=packed_output, batch_first=True)
 
         next_state = torch.stack(
