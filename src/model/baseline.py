@@ -3,7 +3,6 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn as nn
-from dataset.custom_typings import PaddedNSortedUserHistoryBatch
 from pyspark.ml.recommendation import ALS
 from pyspark.sql import DataFrame
 from pyspark.sql import Window as W
@@ -19,6 +18,7 @@ from pyspark.sql.functions import (
     udf,
 )
 from pyspark.sql.types import FloatType, StructField, StructType
+from torch.nn.modules.rnn import PackedSequence
 
 from model.nn import StateTransitionNetwork
 
@@ -49,17 +49,21 @@ class GRU4Rec(nn.Module):
             nn.Tanh(),
         )
 
-    def forward(self, user_history: PaddedNSortedUserHistoryBatch) -> torch.FloatTensor:
-        out = self.gru_layer(user_history)
+    def forward(self, pack_padded_histories: PackedSequence) -> torch.FloatTensor:
+        out = self.gru_layer(pack_padded_histories)
         out = self.output_layer(out)
         return out
 
     # Implement TOP1 loss from the paper
     def loss(
-        self, logits: torch.FloatTensor, relevant_logit: float
+        self, other_logits: torch.FloatTensor, relevant_logit: torch.FloatTensor
     ) -> torch.FloatTensor:
         return torch.mean(
-            torch.sigmoid(logits - relevant_logit) + torch.sigmoid(logits ** 2)
+            torch.sigmoid(
+                other_logits
+                - relevant_logit.unsqueeze(1).expand(-1, other_logits.size(1))
+            )
+            + torch.sigmoid(other_logits ** 2),
         )
 
 
