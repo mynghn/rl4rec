@@ -111,9 +111,9 @@ def train_GRU4Rec(
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
 ) -> Optional[Tuple[List[float], List[float]]]:
-    model.train()
     model = model.to(device)
     optimizer = Adam(model.parameters())
+    model.train()
 
     train_loss_log = []
     for epoch in range(1, n_epochs + 1):
