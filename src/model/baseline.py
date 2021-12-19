@@ -20,7 +20,7 @@ from pyspark.sql.functions import (
 from pyspark.sql.types import FloatType, StructField, StructType
 from torch.nn.modules.rnn import PackedSequence
 
-from model.nn import StateTransitionNetwork
+from ..model.nn import StateTransitionNetwork
 
 
 class GRU4Rec(nn.Module):
