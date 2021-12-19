@@ -3,7 +3,6 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 from torch.optim import Adam
-from torch.optim.optimizer import Optimizer
 from tqdm import tqdm
 
 from ..dataset.retailrocket import Retailrocket4GRU4RecLoader, RetailrocketDataLoader
