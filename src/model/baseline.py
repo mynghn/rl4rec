@@ -64,6 +64,7 @@ class GRU4Rec(nn.Module):
                 - relevant_logit.unsqueeze(1).expand(-1, other_logits.size(1))
             )
             + torch.sigmoid(other_logits ** 2),
+            dim=1,
         )
 
 
