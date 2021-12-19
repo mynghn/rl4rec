@@ -389,9 +389,7 @@ class Retailrocket4GRU4RecLoader(DataLoader):
                 lengths=sorted_lengths,
                 batch_first=True,
             ),
-            "current_item_indices": torch.LongTensor(current_items)[
-                sorted_idx
-            ].tolist(),
+            "current_item_indices": [current_items[i] for i in sorted_idx],
             "items_appeared": set(chain(*item_episodes)),
         }
 
