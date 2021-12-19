@@ -129,7 +129,7 @@ def train_GRU4Rec(
             # 2. Compute TOP1 Loss
             other_logits = torch.stack(
                 [
-                    logits[list(batch["items_appeared"] - set(curr))]
+                    logits[list(batch["items_appeared"] - set([curr]))]
                     for curr in batch["current_item_indices"]
                 ]
             )
