@@ -12,10 +12,10 @@ class StateTransitionNetwork(nn.Module):
         dropout: int,
         user_action_embedding_dim: int = -1,
         n_actions: int = None,
-        padding_singal: int = None,
+        padding_signal: int = None,
     ):
         super(StateTransitionNetwork, self).__init__()
-        self.padding_signal = padding_singal
+        self.padding_signal = padding_signal
 
         self.n_items = n_items
 
