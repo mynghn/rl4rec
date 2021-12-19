@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, Dataset
 from .custom_typings import PaddedNSortedUserHistoryBatch
 
 
-class RetailrocketDataset(Dataset):
+class RetailrocketEpisodeDataset(Dataset):
     events_fetching_dtypes = {
         "visitorid": str,
         "itemid": str,
@@ -32,7 +32,8 @@ class RetailrocketDataset(Dataset):
         train: bool,
         split_ratio: float,
         discount_factor: float,
-        days_in_episode: int,
+        interval_hours_in_episode: int = 24,
+        item_space_size: int = None,
         category_id: str = None,
         train_item_index_map: pd.DataFrame = None,
     ):
@@ -44,7 +45,8 @@ class RetailrocketDataset(Dataset):
         self.category_id = category_id
 
         self.discount_factor = discount_factor
-        self.days_in_episode = days_in_episode
+        self.interval_hours_in_episode = interval_hours_in_episode
+        self.item_space_size = item_space_size
 
         # 0. Fetch Raw data
         self.events_df = self._get_events_df()
@@ -53,7 +55,7 @@ class RetailrocketDataset(Dataset):
         # 1. Build event logs
         self.logs = self._build_event_logs()
 
-        # 2. Build index maps
+        # 2. Build item index map
         if self.train is True:
             self.item_index_map = self._build_item_index_map()
         else:
@@ -61,19 +63,9 @@ class RetailrocketDataset(Dataset):
                 train_item_index_map is not None
             ), "Item-index mapping from train sequence should be provided for evaluation dataset."
             self.item_index_map = train_item_index_map
-        self.user_action_index_map = self._build_user_action_index_map(
-            self.item_index_map
-        )
 
         # 3. Build final data
-        self.max_unixtime = self.logs.timestamp.max()
-        (
-            self.df,
-            self.lifetime_timestamps_book,
-            self.lifetime_items_book,
-            self.lifetime_user_actions_book,
-            self.lifetime_rewards_book,
-        ) = self._build_data()
+        self.episodes = self._build_episodes()
 
     def _get_events_df(self) -> pd.DataFrame:
         df = pd.read_csv(
@@ -127,26 +119,17 @@ class RetailrocketDataset(Dataset):
             preprocessed = preprocessed.iloc[n_train:]
             preprocessed.reset_index(drop=True, inplace=True)
 
-        # 3. Assign reward values
+        # 3. Reduce item space size
+        if self.item_space_size:
+            cnt_by_item = preprocessed.groupby("itemid")[["timestamp"]].count()
+            cnt_by_item.sort_values(by="timestamp", ascending=False, inplace=True)
+            popular_items = cnt_by_item.index.to_numpy()[: self.item_space_size]
+            preprocessed = preprocessed[preprocessed.itemid.isin(popular_items)]
+
+        # 4. Assign reward values
         preprocessed["reward"] = preprocessed.event.map(self.reward_map)
 
         return preprocessed
-
-    def _build_user_action_index_map(
-        self, item_index_map: pd.DataFrame
-    ) -> pd.DataFrame:
-        user_action_index_map = item_index_map.copy()
-        user_action_index_map.drop("item_index", axis=1, inplace=True)
-        user_action_index_map["event"] = user_action_index_map.itemid.map(
-            lambda _: list(self.reward_map.keys())
-        )
-        user_action_index_map = user_action_index_map.explode(column="event")
-        user_action_index_map.sort_values(by=["itemid", "event"], inplace=True)
-        user_action_index_map.reset_index(drop=True, inplace=True)
-        user_action_index_map.rename_axis("user_action_index", inplace=True)
-        user_action_index_map.reset_index(drop=False, inplace=True)
-
-        return user_action_index_map
 
     def _build_item_index_map(self) -> pd.DataFrame:
         df = self.logs[["itemid"]].copy()
@@ -158,14 +141,25 @@ class RetailrocketDataset(Dataset):
 
         return df
 
-    def _build_data(
+    def _label_episode(self, timestamps: List[int]) -> List[int]:
+        label = 0
+        episode_labels = [label]
+        for idx in range(1, len(timestamps)):
+            if (
+                timestamps[idx] - timestamps[idx - 1]
+                > self.interval_hours_in_episode * 60 * 60 * 1000
+            ):
+                label += 1
+            episode_labels.append(label)
+        return episode_labels
+
+    def _build_episodes(
         self,
     ) -> Tuple[
         pd.DataFrame,
         Dict[str, List[int]],
-        Dict[str, List[int]],
-        Dict[str, List[int]],
         Dict[str, List[float]],
+        Dict[str, List[int]],
     ]:
         # 1. Merge indices
         df = self.logs.merge(self.item_index_map, on="itemid", how="inner").merge(
@@ -181,89 +175,38 @@ class RetailrocketDataset(Dataset):
         # 3. Build lifetime sequence books by users
         lifetime_timestamps_book = groupedby_user["timestamp"].apply(list).to_dict()
         lifetime_items_book = groupedby_user["item_index"].apply(list).to_dict()
-        lifetime_user_actions_book = (
-            groupedby_user["user_action_index"].apply(list).to_dict()
-        )
         lifetime_rewards_book = groupedby_user["reward"].apply(list).to_dict()
 
-        # 3. Filter insufficient records
-        unixtime_interval = self.days_in_episode * 86400 * 1000
-        df = df[
-            (df["event_index_in_user_history"] > 0)
-            & (df["timestamp"] <= self.max_unixtime - unixtime_interval)
-        ]
+        # 4. Build episodes book
+        episode_labels_book = {
+            user_id: self._label_episode(timestamps)
+            for user_id, timestamps in lifetime_timestamps_book.items()
+        }
+        episodes = []
+        for user_id, episode_labels in episode_labels_book.items():
+            item_seq = lifetime_items_book[user_id]
+            reward_seq = lifetime_rewards_book[user_id]
 
-        df.reset_index(drop=True, inplace=True)
+            n_episodes = max(episode_labels) + 1
+            for label in range(n_episodes):
+                if episode_labels.count(label) > 1:
+                    start = episode_labels.index(label)
+                    if label + 1 < n_episodes:
+                        end = episode_labels.index(label + 1)
+                    else:
+                        end = len(episode_labels)
 
-        return (
-            df,
-            lifetime_timestamps_book,
-            lifetime_items_book,
-            lifetime_user_actions_book,
-            lifetime_rewards_book,
-        )
+                    item_episode = item_seq[start:end]
+                    reward_episode = reward_seq[start:end]
+                    episodes.append((user_id, item_episode, reward_episode))
+
+        return np.array(episodes, dtype=object)
 
     def __len__(self) -> int:
-        return self.df.shape[0]
+        return len(self.episodes)
 
     def __getitem__(self, idx: Any) -> List[Any]:
-        if isinstance(idx, int):
-            row = self.df.iloc[idx]
-            return self._get_data_line(row)
-        else:
-            indexed = self.df.iloc[idx]
-            return [self._get_data_line(row) for _, row in indexed.iterrows()]
-
-    def _get_data_line(self, row: pd.Series) -> List[Union[List[int], int, float]]:
-        user_id = row["visitorid"]
-        index_in_history = row["event_index_in_user_history"]
-
-        user_history = self.lifetime_user_actions_book[user_id][:index_in_history]
-
-        timestamp_followings = self.lifetime_timestamps_book[user_id][index_in_history:]
-        reward_followings = self.lifetime_rewards_book[user_id][index_in_history:]
-
-        reward_episode = self._slice_episode(
-            followings=reward_followings, timestamps=timestamp_followings
-        )
-        episodic_return = self._compute_return(rewards=reward_episode)
-
-        if self.train is True:
-            return [
-                user_history,
-                row["item_index"],
-                episodic_return,
-            ]
-        else:
-            item_followings = self.lifetime_items_book[user_id][index_in_history:]
-            item_episode = self._slice_episode(
-                followings=item_followings, timestamps=timestamp_followings
-            )
-            return [
-                user_id,
-                user_history,
-                item_episode,
-                reward_episode,
-                episodic_return,
-            ]
-
-    def _slice_episode(self, followings: List[float], timestamps: List[int]) -> float:
-        episode_length = self._get_episode_length(timestamps=timestamps)
-        return followings[:episode_length]
-
-    def _compute_return(self, rewards: List[float]) -> float:
-        gammas = (1.0 - self.discount_factor) ** np.arange(len(rewards))
-        return gammas @ np.array(rewards)
-
-    def _get_episode_length(self, timestamps: List[int]) -> int:
-        end_unixtime = timestamps[0] + (self.days_in_episode * 86400 * 1000)
-        length = 1
-        for ts in timestamps[1:]:
-            if ts <= end_unixtime:
-                length += 1
-            else:
-                break
-        return length
+        return self.episodes[idx]
 
 
 class RetailrocketDataLoader(DataLoader):
