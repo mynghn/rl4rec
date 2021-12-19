@@ -310,7 +310,7 @@ class RetailrocketDataLoader(DataLoader):
 
 
 class Retailrocket4GRU4RecLoader(DataLoader):
-    non_tensors = "items_appeared"
+    non_tensors = ["items_appeared"]
 
     def __init__(
         self, train: bool, dataset: RetailrocketEpisodeDataset, *args, **kargs
