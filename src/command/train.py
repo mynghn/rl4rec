@@ -2,10 +2,12 @@ import time
 from typing import List, Optional, Tuple, Union
 
 import torch
+from torch.optim.optimizer import Optimizer
 from tqdm import tqdm
 
-from ..dataset.retailrocket import RetailrocketDataLoader
+from ..dataset.retailrocket import Retailrocket4GRU4RecLoader, RetailrocketDataLoader
 from ..model.agent import TopKOfflineREINFORCE
+from ..model.baseline import GRU4Rec
 
 
 def train_agent(
@@ -100,3 +102,52 @@ def train_agent(
         print("=" * 80)
 
     return action_policy_loss_log, behavior_policy_loss_log
+
+
+def train_GRU4Rec(
+    model: GRU4Rec,
+    optimizer: Optimizer,
+    train_loader: Retailrocket4GRU4RecLoader,
+    n_epochs: int,
+    device: torch.device = torch.device("cpu"),
+    debug: bool = False,
+) -> Optional[Tuple[List[float], List[float]]]:
+    model = model.to(device)
+    model.train()
+
+    train_loss_log = []
+    for epoch in range(1, n_epochs + 1):
+        start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        print(f"\nEpoch {epoch} started at: {start_time}\n")
+
+        for batch in tqdm(train_loader, desc="train"):
+            batch = train_loader.to(batch=batch, device=device)
+
+            # 1. Build State
+            logits = model(batch["pack_padded_histories"])
+
+            # 2. Compute TOP1 Loss
+            other_logits = torch.stack(
+                [
+                    logits[list(batch["items_appeared"] - set(curr))]
+                    for curr in batch["current_item_indices"]
+                ]
+            )
+            loss = model.top1_loss(
+                other_logits=other_logits,
+                relevant_logit=logits[batch["current_item_indices"]].view(-1, 1),
+            ).mean()
+
+            # 3. Gradient update agent w/ computed losses
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            if debug is True:
+                train_loss_log.append(loss.cpu().item())
+
+        if debug is True:
+            print(f"Epoch {epoch} Final loss: {loss.cpu().item()}")
+        print("=" * 80)
+
+    return train_loss_log
