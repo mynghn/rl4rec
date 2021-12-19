@@ -52,7 +52,7 @@ class GRU4Rec(nn.Module):
     def forward(self, user_history: PaddedNSortedUserHistoryBatch) -> torch.FloatTensor:
         out = self.gru_layer(user_history)
         out = self.output_layer(out)
-        return
+        return out
 
     # Implement TOP1 loss from the paper
     def loss(
