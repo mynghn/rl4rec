@@ -129,10 +129,14 @@ def train_GRU4Rec(
             # 2. Compute TOP1 Loss
             other_logits = torch.stack(
                 [
-                    logits[list(batch["items_appeared"] - {curr})]
+                    logits[
+                        torch.LongTensor(list(batch["items_appeared"] - {curr})).to(
+                            device
+                        )
+                    ]
                     for curr in batch["current_item_indices"]
                 ]
-            ).to(device)
+            )
             loss = model.top1_loss(
                 other_logits=other_logits,
                 relevant_logit=logits[batch["current_item_indices"]].view(-1, 1),
