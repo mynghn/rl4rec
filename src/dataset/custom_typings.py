@@ -4,11 +4,11 @@ from torch import LongTensor, device
 
 
 @dataclass
-class PaddedNSortedUserHistoryBatch:
+class PaddedNSortedEpisodeBatch:
     data: LongTensor
     lengths: LongTensor
 
     def to(self, device: device):
-        return PaddedNSortedUserHistoryBatch(
+        return PaddedNSortedEpisodeBatch(
             data=self.data.to(device), lengths=self.lengths
         )
