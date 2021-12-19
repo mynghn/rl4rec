@@ -1,5 +1,3 @@
-from typing import Optional
-
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
@@ -14,14 +12,8 @@ class StateTransitionNetwork(nn.Module):
         user_action_embedding_dim: int,
         hidden_size: int,
         padding_singal: int,
-        num_layers: int = 1,
-        dropout: int = 0,
-        user_feature: bool = False,
-        user_feature_embedding_dim: int = None,
-        n_user_features: int = None,
-        item_feature: bool = False,
-        item_feature_embedding_dim: int = None,
-        n_item_features: int = None,
+        num_layers: int,
+        dropout: int,
     ):
         super(StateTransitionNetwork, self).__init__()
         self.padding_signal = padding_singal
@@ -39,52 +31,7 @@ class StateTransitionNetwork(nn.Module):
             batch_first=True,
         )
 
-        self.user_feature_enabled = user_feature
-        if self.user_feature_enabled is True:
-            self.user_feature_embeddings = nn.Embedding(
-                num_embeddings=n_user_features,
-                embedding_dim=user_feature_embedding_dim,
-            )
-        self.item_feature_enabled = item_feature
-        if self.item_feature_enabled is True:
-            self.item_feature_embeddings = nn.Embedding(
-                num_embeddings=n_item_features,
-                embedding_dim=item_feature_embedding_dim,
-            )
-
-    def forward(
-        self,
-        user_history: PaddedNSortedUserHistoryBatch,
-        user_feature_index: Optional[torch.LongTensor] = None,
-        item_feature_index: Optional[torch.LongTensor] = None,
-    ) -> torch.FloatTensor:
-        if user_feature_index is not None and item_feature_index is not None:
-            assert (
-                self.user_feature_enabled and self.item_feature_enabled
-            ), "User feature and item feature embeddings not activated."
-            return self.forward_w_user_item_feature(
-                user_history=user_history,
-                user_feature_index=user_feature_index,
-                item_feature_index=item_feature_index,
-            )
-        elif user_feature_index is not None:
-            assert self.user_feature_enabled, "User feature embeddings not activated."
-            return self.forward_w_user_feature(
-                user_history=user_history,
-                user_feature_index=user_feature_index,
-            )
-        elif item_feature_index is not None:
-            assert self.item_feature_enabled, "Item feature embeddings not activated."
-            return self.forward_w_item_feature(
-                user_history=user_history,
-                item_feature_index=item_feature_index,
-            )
-        else:
-            return self.forward_only_user_history(user_history=user_history)
-
-    def forward_only_user_history(
-        self, user_history: PaddedNSortedUserHistoryBatch
-    ) -> torch.FloatTensor:
+    def forward(self, user_history: PaddedNSortedUserHistoryBatch) -> torch.FloatTensor:
         padding_idx_replaced = user_history.data.masked_fill(
             user_history.data == self.padding_signal,
             self.user_action_embeddings.padding_idx,
@@ -107,37 +54,3 @@ class StateTransitionNetwork(nn.Module):
         )
 
         return next_state
-
-    def forward_w_user_item_feature(
-        self,
-        user_history: PaddedNSortedUserHistoryBatch,
-        user_feature_index: torch.LongTensor,
-        item_feature_index: torch.LongTensor,
-    ) -> torch.FloatTensor:
-        rnn_output = self.forward_only_user_history(user_history)
-        user_feature_embedded = self.user_feature_embeddings(user_feature_index)
-        item_feature_embedded = self.item_feature_embeddings(item_feature_index)
-
-        return torch.cat(
-            [rnn_output, user_feature_embedded, item_feature_embedded], dim=1
-        )
-
-    def forward_w_user_feature(
-        self,
-        user_history: PaddedNSortedUserHistoryBatch,
-        user_feature_index: torch.LongTensor,
-    ) -> torch.FloatTensor:
-        rnn_output = self.forward_only_user_history(user_history)
-        user_feature_embedded = self.user_feature_embeddings(user_feature_index)
-
-        return torch.cat([rnn_output, user_feature_embedded], dim=1)
-
-    def forward_w_item_feature(
-        self,
-        user_history: PaddedNSortedUserHistoryBatch,
-        item_feature_index: torch.LongTensor,
-    ) -> torch.FloatTensor:
-        rnn_output = self.forward_only_user_history(user_history)
-        item_feature_embedded = self.item_feature_embeddings(item_feature_index)
-
-        return torch.cat([rnn_output, item_feature_embedded], dim=1)
