@@ -31,8 +31,8 @@ class GRU4Rec(nn.Module):
         hidden_size: int,
         output_size: int,
         padding_signal: int,
-        n_gru_layers: int,
-        dropout: int = 0,
+        n_gru_layers: int = 1,
+        dropout: int = 0.4,
     ):
         super(GRU4Rec, self).__init__()
 
