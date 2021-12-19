@@ -26,26 +26,27 @@ from ..model.nn import StateTransitionNetwork
 class GRU4Rec(nn.Module):
     def __init__(
         self,
-        n_user_actions: int,
-        user_action_embedding_dim: int,
+        n_items: int,
         hidden_size: int,
-        output_size: int,
-        padding_signal: int,
         n_gru_layers: int = 1,
         dropout: int = 0.4,
+        user_action_embedding_dim: int = -1,
+        n_actions: int = None,
+        padding_signal: int = None,
     ):
         super(GRU4Rec, self).__init__()
 
         self.gru_layer = StateTransitionNetwork(
-            n_user_actions=n_user_actions,
-            user_action_embedding_dim=user_action_embedding_dim,
+            n_items=n_items,
             hidden_size=hidden_size,
-            padding_signal=padding_signal,
             num_layers=n_gru_layers,
             dropout=dropout,
+            user_action_embedding_dim=user_action_embedding_dim,
+            n_actions=n_actions,
+            padding_signal=padding_signal,
         )
         self.output_layer = nn.Sequential(
-            nn.Linear(in_features=hidden_size, out_features=output_size),
+            nn.Linear(in_features=hidden_size, out_features=n_items),
             nn.Tanh(),
         )
 
