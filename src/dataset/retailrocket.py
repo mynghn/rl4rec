@@ -1,7 +1,6 @@
 import os
-from itertools import chain
 from math import ceil
-from typing import Any, Dict, List, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -310,8 +309,6 @@ class RetailrocketDataLoader(DataLoader):
 
 
 class Retailrocket4GRU4RecLoader(DataLoader):
-    non_tensors = ["items_appeared"]
-
     def __init__(
         self, train: bool, dataset: RetailrocketEpisodeDataset, *args, **kargs
     ):
@@ -366,7 +363,7 @@ class Retailrocket4GRU4RecLoader(DataLoader):
 
     def train_collate_func(
         self, batch: List[np.ndarray]
-    ) -> Dict[str, Union[PackedSequence, List[int], Set[int]]]:
+    ) -> Dict[str, Union[PackedSequence, np.ndarray]]:
         _, item_episodes, reward_episodes = tuple(np.array(batch, dtype=object).T)
 
         histories_encoded = [
@@ -379,16 +376,17 @@ class Retailrocket4GRU4RecLoader(DataLoader):
         padded_histories, lengths = self.backpad_sequence(histories_encoded)
         sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
 
+        import pdb
+
+        pdb.set_trace()
+
         return {
             "pack_padded_histories": pack_padded_sequence(
                 input=padded_histories[sorted_idx],
                 lengths=sorted_lengths,
                 batch_first=True,
             ),
-            "item_episodes": torch.from_numpy(
-                item_episodes[sorted_idx].astype(np.int64)
-            ).view(len(batch), -1),
-            "items_appeared": set(chain(*item_episodes)),
+            "item_episodes": item_episodes[sorted_idx],
         }
 
     def eval_collate_func(
@@ -405,9 +403,4 @@ class Retailrocket4GRU4RecLoader(DataLoader):
         pass
 
     def to(self, batch: Dict, device: torch.device) -> Dict:
-        batch_on_device = {
-            k: v.to(device) for k, v in batch.items() if k not in self.non_tensors
-        }
-        for k in self.non_tensors:
-            batch_on_device[k] = batch[k]
-        return batch_on_device
+        return {k: v.to(device) for k, v in batch.items()}
