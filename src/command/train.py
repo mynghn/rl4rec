@@ -2,6 +2,7 @@ import time
 from itertools import chain
 from typing import List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 from torch.optim import Adam
 from tqdm import tqdm
@@ -10,100 +11,6 @@ from ..dataset.retailrocket import Retailrocket4GRU4RecLoader, RetailrocketDataL
 from ..model.agent import TopKOfflineREINFORCE
 from ..model.baseline import GRU4Rec
 from ..model.policy import BehaviorPolicy
-
-
-def train_agent(
-    agent: TopKOfflineREINFORCE,
-    train_loader: RetailrocketDataLoader,
-    n_epochs: Union[int, Tuple[int]],
-    device: torch.device = torch.device("cpu"),
-    debug: bool = False,
-) -> Optional[Tuple[List[float], List[float]]]:
-    agent = agent.to(device)
-    agent.train()
-
-    if isinstance(n_epochs, int):
-        n_epochs_beta = n_epochs_pi = n_epochs
-    elif isinstance(n_epochs, tuple):
-        n_epochs_beta, n_epochs_pi = n_epochs
-    else:
-        raise TypeError(
-            f"Unregistered {type(n_epochs)} type n_epochs entered.: {n_epochs}"
-        )
-
-    # 1. Train behavior policy first
-    behavior_policy_loss_log = []
-    for epoch in range(1, n_epochs_beta + 1):
-        start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        print(f"\nEpoch {epoch} for behavior policy train\nstarted at: {start_time}\n")
-
-        for batch in tqdm(train_loader, desc="train"):
-            batch = train_loader.to(batch=batch, device=device)
-
-            # 1. Build State
-            beta_state = agent.beta_state_network(
-                user_history=batch["user_history"],
-                user_feature_index=batch.get("user_feature_index"),
-                item_feature_index=batch.get("item_feature_index"),
-            )
-
-            # 2. Compute Policy Loss
-            behavior_policy_loss = agent.behavior_policy_loss(
-                beta_state=beta_state, item_index=batch["item_index"]
-            )
-
-            # 3. Gradient update agent w/ computed losses
-            agent.update_behavior_policy(behavior_policy_loss=behavior_policy_loss)
-
-            if debug is True:
-                behavior_policy_loss_log.append(behavior_policy_loss.cpu().item())
-
-        if debug is True:
-            print(f"Final behavior policy loss: {behavior_policy_loss.cpu().item()}")
-
-    # 2. Train action policy
-    action_policy_loss_log = []
-    agent.beta_state_network.eval()
-    agent.behavior_policy.eval()
-    for epoch in range(1, n_epochs_pi + 1):
-        start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        print(f"\nEpoch {epoch} for action policy train\nstarted at: {start_time}\n")
-
-        for batch in tqdm(train_loader, desc="train"):
-            batch = train_loader.to(batch=batch, device=device)
-
-            # 1. Build States
-            beta_state = agent.beta_state_network(
-                user_history=batch["user_history"],
-                user_feature_index=batch.get("user_feature_index"),
-                item_feature_index=batch.get("item_feature_index"),
-            )
-            pi_state = agent.pi_state_network(
-                user_history=batch["user_history"],
-                user_feature_index=batch.get("user_feature_index"),
-                item_feature_index=batch.get("item_feature_index"),
-            )
-
-            # 2. Compute Policy Loss
-            action_policy_loss = agent.action_policy_loss(
-                pi_state=pi_state,
-                beta_state=beta_state,
-                item_index=batch["item_index"],
-                episodic_return=batch["return"],
-            )
-
-            # 3. Gradient update agent w/ computed losses
-            agent.update_action_policy(action_policy_loss=action_policy_loss)
-
-            if debug is True:
-                action_policy_loss_log.append(action_policy_loss.cpu().item())
-
-        if debug is True:
-            print(f"Final action policy loss: {action_policy_loss.cpu().item()}")
-
-        print("=" * 80)
-
-    return action_policy_loss_log, behavior_policy_loss_log
 
 
 def train_GRU4Rec(
@@ -165,3 +72,96 @@ def train_GRU4Rec(
         print("=" * 80)
 
     return train_loss_log
+
+
+def train_agent(
+    agent: TopKOfflineREINFORCE,
+    train_loader: RetailrocketDataLoader,
+    n_epochs: Union[int, Tuple[int]],
+    device: torch.device = torch.device("cpu"),
+    debug: bool = False,
+    behavior_policy_pretrained: bool = False,
+) -> Optional[Tuple[List[float], List[float]]]:
+    agent = agent.to(device)
+
+    if isinstance(n_epochs, int):
+        n_epochs_beta = n_epochs_pi = n_epochs
+    elif isinstance(n_epochs, tuple):
+        n_epochs_beta, n_epochs_pi = n_epochs
+    else:
+        raise TypeError(
+            f"Unregistered {type(n_epochs)} type n_epochs entered.: {n_epochs}"
+        )
+
+    # 1. Train behavior policy first
+    if behavior_policy_pretrained is False:
+        agent.behavior_policy.train()
+        behavior_policy_loss_log = train_GRU4Rec(
+            model=agent.behavior_policy,
+            train_loader=train_loader,
+            n_epochs=n_epochs_beta,
+            device=device,
+            debug=debug,
+        )
+
+    # 2. Train action policy
+    agent.train()
+    agent.behavior_policy.eval()
+    action_policy_loss_log = []
+    for epoch in range(1, n_epochs_pi + 1):
+        start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        print(f"\nEpoch {epoch} for action policy\nstarted at: {start_time}\n")
+
+        for batch in tqdm(train_loader, desc="train"):
+            batch = train_loader.to(batch=batch, device=device)
+
+            # 1. Build States
+            beta_state, _ = agent.behavior_policy.struct_state(
+                batch["pack_padded_histories"]
+            )
+
+            pi_state, lengths = agent.pi_state_network(batch["pack_padded_histories"])
+
+            # 2. Compute Policy Loss
+            losses = []
+            for (
+                ep_pi_state,
+                ep_beta_state,
+                hist_len,
+                ep_item_index,
+                ep_return_at_t,
+            ) in zip(
+                pi_state,
+                beta_state,
+                lengths,
+                batch["item_episodes"],
+                batch["return_at_t"],
+            ):
+                ep_len = hist_len + 1
+                episodic_loss = agent.episodic_loss(
+                    pi_state=ep_pi_state[:hist_len, :],
+                    beta_state=ep_beta_state[:hist_len, :],
+                    item_index=torch.from_numpy(
+                        ep_item_index[1:ep_len].astype(np.int64)
+                    ).view(hist_len, 1),
+                    episodic_return=ep_return_at_t.view(hist_len, 1),
+                )
+
+                losses.append(episodic_loss.view(1))
+            action_policy_loss = torch.cat(losses).mean()
+
+            # 3. Gradient update agent w/ computed losses
+            agent.action_policy_optimizer.zero_grad()
+            action_policy_loss.backward()
+            agent.action_policy_optimizer.step()
+
+            if debug is True:
+                action_policy_loss_log.append(action_policy_loss.cpu().item())
+
+        if debug is True:
+            print(f"Final action policy loss: {action_policy_loss.cpu().item()}")
+
+        print("=" * 80)
+
+    if debug is True:
+        return action_policy_loss_log, behavior_policy_loss_log
