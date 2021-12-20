@@ -2,6 +2,7 @@ from typing import Sequence
 
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import PackedSequence
 
 from ..model.baseline import GRU4Rec
 
@@ -115,3 +116,6 @@ class BehaviorPolicy(GRU4Rec):
     def log_probs(self, state: torch.FloatTensor) -> torch.FloatTensor:
         logits = self.output_layer(state)
         return torch.log(self.softmax(logits))
+
+    def struct_state(self, pack_padded_histories: PackedSequence) -> torch.FloatTensor:
+        return super()(pack_padded_histories)
