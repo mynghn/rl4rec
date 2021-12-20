@@ -124,23 +124,27 @@ def train_GRU4Rec(
             batch = train_loader.to(batch=batch, device=device)
 
             # 1. Build State
-            logits = model(batch["pack_padded_histories"])
+            batch_logits, lengths = model(batch["pack_padded_histories"])
 
             # 2. Compute TOP1 Loss
-            other_logits = torch.stack(
-                [
-                    logits[
-                        torch.LongTensor(list(batch["items_appeared"] - {curr})).to(
-                            device
+            losses = []
+            for logits, length, item_episode in zip(
+                batch_logits, lengths, batch["item_episodes"]
+            ):
+                valid_logits = logits[:length]
+                batch_loss = []
+                for i in range(length):
+                    curr = item_episode[i + 1]
+                    negative_samples = list(batch["items_appeared"] - {curr})
+                    other_logits = valid_logits[i, negative_samples]
+                    batch_loss.append(
+                        model.top1_loss(
+                            other_logits=other_logits,
+                            relevant_logit=valid_logits[i, curr],
                         )
-                    ]
-                    for curr in batch["current_item_indices"]
-                ]
-            )
-            loss = model.top1_loss(
-                other_logits=other_logits,
-                relevant_logit=logits[batch["current_item_indices"]].view(-1, 1),
-            ).mean()
+                    )
+                losses.append(torch.FloatTensor(batch_loss).mean())
+            loss = torch.FloatTensor(losses).mean()
 
             # 3. Gradient update agent w/ computed losses
             optimizer.zero_grad()

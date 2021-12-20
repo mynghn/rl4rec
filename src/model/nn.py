@@ -42,11 +42,4 @@ class StateTransitionNetwork(nn.Module):
         packed_output, _ = self.rnn(input=pack_padded_histories)
         output, lengths = pad_packed_sequence(sequence=packed_output, batch_first=True)
 
-        next_state = torch.stack(
-            [
-                output[batch_idx, lengths[batch_idx] - 1, :]
-                for batch_idx in range(output.size(0))
-            ]
-        )
-
-        return next_state
+        return output, lengths

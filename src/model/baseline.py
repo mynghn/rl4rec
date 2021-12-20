@@ -51,9 +51,9 @@ class GRU4Rec(nn.Module):
         )
 
     def forward(self, pack_padded_histories: PackedSequence) -> torch.FloatTensor:
-        out = self.gru_layer(pack_padded_histories)
+        out, lengths = self.gru_layer(pack_padded_histories)
         out = self.output_layer(out)
-        return out
+        return out, lengths
 
     # Implement TOP1 loss from the paper
     def top1_loss(
