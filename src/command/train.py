@@ -2,7 +2,6 @@ import time
 from itertools import chain
 from typing import List, Optional, Tuple, Union
 
-import numpy as np
 import torch
 from torch.optim import Adam
 from tqdm import tqdm
@@ -141,10 +140,12 @@ def train_agent(
                 episodic_loss = agent.episodic_loss(
                     pi_state=ep_pi_state[:hist_len, :],
                     beta_state=ep_beta_state[:hist_len, :],
-                    item_index=torch.from_numpy(
-                        ep_item_index[1:ep_len].astype(np.int64)
-                    ).view(hist_len, 1),
-                    episodic_return=ep_return_at_t.view(hist_len, 1),
+                    item_index=torch.LongTensor(ep_item_index[1:ep_len]).view(
+                        hist_len, 1
+                    ),
+                    episodic_return=torch.FloatTensor(ep_return_at_t[1:ep_len]).view(
+                        hist_len, 1
+                    ),
                 )
 
                 losses.append(episodic_loss.view(1))
