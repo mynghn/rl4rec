@@ -312,11 +312,17 @@ class Retailrocket4GRU4RecLoader(DataLoader):
     non_tensors = ["item_episodes"]
 
     def __init__(
-        self, train: bool, dataset: RetailrocketEpisodeDataset, *args, **kargs
+        self,
+        dataset: RetailrocketEpisodeDataset,
+        train: bool,
+        discount_factor: float = 0.01,
+        *args,
+        **kargs
     ):
         self.dataset = dataset
         self.n_items = dataset.item_index_map.shape[0]
         self.train = train
+        self.gamma = 1.0 - discount_factor
         if self.train is True:
             super().__init__(
                 dataset=self.dataset, collate_fn=self.train_collate_func, *args, **kargs
@@ -326,7 +332,7 @@ class Retailrocket4GRU4RecLoader(DataLoader):
                 dataset=self.dataset, collate_fn=self.eval_collate_func, *args, **kargs
             )
 
-    def backpad_sequence(
+    def _backpad_sequence(
         self, sequences: Sequence[torch.FloatTensor]
     ) -> Tuple[torch.FloatTensor, torch.LongTensor]:
         lengths = torch.LongTensor([seq.size(0) for seq in sequences])
@@ -341,27 +347,21 @@ class Retailrocket4GRU4RecLoader(DataLoader):
         )
         return padded, lengths
 
-    def slice_n_explode(
-        self,
-        item_episodes: Sequence[Sequence[int]],
-        reward_episodes: Sequence[Sequence[int]],
-    ) -> Tuple[List[List[int]], List[List[int]], List[int]]:
-        item_histories = []
-        reward_histories = []
-        current_items = []
-        for item_ep, reward_ep in zip(item_episodes, reward_episodes):
-            for idx in range(1, len(item_ep)):
-                item_histories.append(item_ep[:idx])
-                reward_histories.append(reward_ep[:idx])
-                current_items.append(item_ep[idx])
-        return item_histories, reward_histories, current_items
-
-    def n_hot_encode(
+    def _n_hot_encode(
         self, item_seq: torch.LongTensor, reward_seq: torch.FloatTensor
     ) -> torch.FloatTensor:
         encoded = one_hot(item_seq, num_classes=self.n_items)
         encoded = encoded * reward_seq.unsqueeze(1).expand(-1, encoded.size(1))
         return encoded
+
+    def _compute_return(self, rewards: Sequence[float]) -> np.float32:
+        gammas = self.gamma ** np.arange(len(rewards))
+        return gammas @ np.array(rewards)
+
+    def _compute_return_at_t(self, reward_episode: Sequence[float]) -> List[np.float32]:
+        return [
+            self._compute_return(reward_episode[i:]) for i in range(len(reward_episode))
+        ]
 
     def train_collate_func(
         self, batch: List[np.ndarray]
@@ -369,14 +369,18 @@ class Retailrocket4GRU4RecLoader(DataLoader):
         _, item_episodes, reward_episodes = tuple(np.array(batch, dtype=object).T)
 
         histories_encoded = [
-            self.n_hot_encode(
+            self._n_hot_encode(
                 torch.LongTensor(item_ep[:-1]), torch.FloatTensor(reward_ep[:-1])
             )
             for item_ep, reward_ep in zip(item_episodes, reward_episodes)
         ]
 
-        padded_histories, lengths = self.backpad_sequence(histories_encoded)
+        padded_histories, lengths = self._backpad_sequence(histories_encoded)
         sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
+
+        return_at_t = np.array(
+            [self._compute_return_at_t(reward_ep) for reward_ep in reward_episodes]
+        )
 
         return {
             "pack_padded_histories": pack_padded_sequence(
@@ -385,6 +389,7 @@ class Retailrocket4GRU4RecLoader(DataLoader):
                 batch_first=True,
             ),
             "item_episodes": item_episodes[sorted_idx],
+            "return_at_t": return_at_t[sorted_idx],
         }
 
     def eval_collate_func(
