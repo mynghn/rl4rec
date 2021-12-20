@@ -310,7 +310,7 @@ class RetailrocketDataLoader(DataLoader):
 
 
 class Retailrocket4GRU4RecLoader(DataLoader):
-    non_tensors = ("items_appeared", "current_item_indices")
+    non_tensors = ["items_appeared"]
 
     def __init__(
         self, train: bool, dataset: RetailrocketEpisodeDataset, *args, **kargs
@@ -369,15 +369,11 @@ class Retailrocket4GRU4RecLoader(DataLoader):
     ) -> Dict[str, Union[PackedSequence, List[int], Set[int]]]:
         _, item_episodes, reward_episodes = tuple(np.array(batch, dtype=object).T)
 
-        item_histories, reward_histories, current_items = self.slice_n_explode(
-            item_episodes, reward_episodes
-        )
-
         histories_encoded = [
             self.n_hot_encode(
-                torch.LongTensor(item_hist), torch.FloatTensor(reward_hist)
+                torch.LongTensor(item_ep[:-1]), torch.FloatTensor(reward_ep[:-1])
             )
-            for item_hist, reward_hist in zip(item_histories, reward_histories)
+            for item_ep, reward_ep in zip(item_episodes, reward_episodes)
         ]
 
         padded_histories, lengths = self.backpad_sequence(histories_encoded)
@@ -389,7 +385,9 @@ class Retailrocket4GRU4RecLoader(DataLoader):
                 lengths=sorted_lengths,
                 batch_first=True,
             ),
-            "current_item_indices": [current_items[i] for i in sorted_idx],
+            "item_episodes": torch.from_numpy(
+                item_episodes[sorted_idx].astype(np.int64)
+            ).view(len(batch), -1),
             "items_appeared": set(chain(*item_episodes)),
         }
 
