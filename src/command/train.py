@@ -1,4 +1,5 @@
 import time
+from itertools import chain
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -112,8 +113,8 @@ def train_GRU4Rec(
     debug: bool = False,
 ) -> Optional[Tuple[List[float], List[float]]]:
     model = model.to(device)
-    optimizer = Adam(model.parameters())
     model.train()
+    optimizer = Adam(model.parameters())
 
     train_loss_log = []
     for epoch in range(1, n_epochs + 1):
@@ -128,23 +129,24 @@ def train_GRU4Rec(
 
             # 2. Compute TOP1 Loss
             losses = []
+            items_appeared = set(chain(*[ep for ep in batch["item_episodes"]]))
             for logits, length, item_episode in zip(
                 batch_logits, lengths, batch["item_episodes"]
             ):
-                valid_logits = logits[:length]
-                batch_loss = []
+                other_logits = []
+                relevant_logit = []
                 for i in range(length):
                     curr = item_episode[i + 1]
-                    negative_samples = list(batch["items_appeared"] - {curr})
-                    other_logits = valid_logits[i, negative_samples]
-                    batch_loss.append(
-                        model.top1_loss(
-                            other_logits=other_logits,
-                            relevant_logit=valid_logits[i, curr],
-                        )
+                    other_logits.append(
+                        logits[i, list(items_appeared - {curr})].view(1, -1)
                     )
-                losses.append(torch.FloatTensor(batch_loss).mean())
-            loss = torch.FloatTensor(losses).mean()
+                    relevant_logit.append(logits[i, curr].view(1))
+                episode_loss = model.top1_loss(
+                    torch.cat(other_logits), torch.cat(relevant_logit)
+                )
+
+                losses.append(episode_loss.sum().view(1))
+            loss = torch.cat(losses).mean()
 
             # 3. Gradient update agent w/ computed losses
             optimizer.zero_grad()
