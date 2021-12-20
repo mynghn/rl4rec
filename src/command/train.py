@@ -6,7 +6,7 @@ import torch
 from torch.optim import Adam
 from tqdm import tqdm
 
-from ..dataset.retailrocket import Retailrocket4GRU4RecLoader, RetailrocketDataLoader
+from ..dataset.retailrocket import RetailrocketEpisodeLoader
 from ..model.agent import TopKOfflineREINFORCE
 from ..model.baseline import GRU4Rec
 from ..model.policy import BehaviorPolicy
@@ -14,7 +14,7 @@ from ..model.policy import BehaviorPolicy
 
 def train_GRU4Rec(
     model: Union[GRU4Rec, BehaviorPolicy],
-    train_loader: Retailrocket4GRU4RecLoader,
+    train_loader: RetailrocketEpisodeLoader,
     n_epochs: int,
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
@@ -75,7 +75,7 @@ def train_GRU4Rec(
 
 def train_agent(
     agent: TopKOfflineREINFORCE,
-    train_loader: RetailrocketDataLoader,
+    train_loader: RetailrocketEpisodeLoader,
     n_epochs: Union[int, Tuple[int]],
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
