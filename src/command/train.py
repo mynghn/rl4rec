@@ -128,8 +128,8 @@ def train_GRU4Rec(
             batch_logits, lengths = model(batch["pack_padded_histories"])
 
             # 2. Compute TOP1 Loss
-            losses = []
             items_appeared = set(chain(*[ep for ep in batch["item_episodes"]]))
+            losses = []
             for logits, length, item_episode in zip(
                 batch_logits, lengths, batch["item_episodes"]
             ):
@@ -137,9 +137,8 @@ def train_GRU4Rec(
                 relevant_logit = []
                 for i in range(length):
                     curr = item_episode[i + 1]
-                    other_logits.append(
-                        logits[i, list(items_appeared - {curr})].view(1, -1)
-                    )
+                    negative_samples = list(items_appeared - set(item_episode))
+                    other_logits.append(logits[i, negative_samples].view(1, -1))
                     relevant_logit.append(logits[i, curr].view(1))
                 episode_loss = model.top1_loss(
                     torch.cat(other_logits), torch.cat(relevant_logit)
