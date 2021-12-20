@@ -66,6 +66,9 @@ def train_GRU4Rec(
             if debug is True:
                 train_loss_log.append(loss.cpu().item())
 
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
         if debug is True:
             print(f"Epoch {epoch} Final loss: {loss.cpu().item()}")
         print("=" * 80)
