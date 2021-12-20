@@ -376,10 +376,6 @@ class Retailrocket4GRU4RecLoader(DataLoader):
         padded_histories, lengths = self.backpad_sequence(histories_encoded)
         sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
 
-        import pdb
-
-        pdb.set_trace()
-
         return {
             "pack_padded_histories": pack_padded_sequence(
                 input=padded_histories[sorted_idx],
