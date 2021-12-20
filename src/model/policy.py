@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 
-class SoftmaxStochasticPolicy(nn.Module):
+class SoftmaxStochasticPolicyHead(nn.Module):
     def __init__(
         self,
         n_items: int,
@@ -14,7 +14,7 @@ class SoftmaxStochasticPolicy(nn.Module):
         item_embedding_dim: int = None,
         softmax_temperature: float = 1.0,
     ):
-        super(SoftmaxStochasticPolicy, self).__init__()
+        super(SoftmaxStochasticPolicyHead, self).__init__()
 
         self.adaptive_softmax = adaptive_softmax
         if self.adaptive_softmax is True:

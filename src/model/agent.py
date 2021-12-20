@@ -6,16 +6,16 @@ from torch.nn.modules.loss import KLDivLoss
 from torch.optim.optimizer import Optimizer
 
 from .nn import StateTransitionNetwork
-from .policy import SoftmaxStochasticPolicy
+from .policy import SoftmaxStochasticPolicyHead
 
 
 class TopKOfflineREINFORCE(nn.Module):
     def __init__(
         self,
         pi_state_network: StateTransitionNetwork,
-        action_policy: SoftmaxStochasticPolicy,
+        action_policy: SoftmaxStochasticPolicyHead,
         beta_state_network: StateTransitionNetwork,
-        behavior_policy: SoftmaxStochasticPolicy,
+        behavior_policy: SoftmaxStochasticPolicyHead,
         action_policy_optimizer: Optimizer,
         behavior_policy_optimizer: Optimizer,
         weight_cap: float,
