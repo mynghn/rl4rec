@@ -309,6 +309,8 @@ class RetailrocketDataLoader(DataLoader):
 
 
 class Retailrocket4GRU4RecLoader(DataLoader):
+    non_tensors = ["item_episodes"]
+
     def __init__(
         self, train: bool, dataset: RetailrocketEpisodeDataset, *args, **kargs
     ):
@@ -399,4 +401,9 @@ class Retailrocket4GRU4RecLoader(DataLoader):
         pass
 
     def to(self, batch: Dict, device: torch.device) -> Dict:
-        return {k: v.to(device) for k, v in batch.items()}
+        on_device = {
+            k: v.to(device) for k, v in batch.items() if k not in self.non_tensors
+        }
+        for k in self.non_tensors:
+            on_device[k] = batch[k]
+        return on_device
