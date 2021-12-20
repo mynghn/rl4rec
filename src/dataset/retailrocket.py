@@ -379,7 +379,8 @@ class RetailrocketEpisodeLoader(DataLoader):
         sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
 
         return_at_t = np.array(
-            [self._compute_return_at_t(reward_ep) for reward_ep in reward_episodes]
+            [self._compute_return_at_t(reward_ep) for reward_ep in reward_episodes],
+            dtype=object,
         )
 
         return {
