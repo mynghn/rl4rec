@@ -308,7 +308,7 @@ class RetailrocketDataLoader(DataLoader):
             return batch_on_device
 
 
-class Retailrocket4GRU4RecLoader(DataLoader):
+class RetailrocketEpisodeLoader(DataLoader):
     non_tensors = ["item_episodes"]
 
     def __init__(
