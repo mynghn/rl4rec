@@ -3,6 +3,8 @@ from typing import Sequence
 import torch
 import torch.nn as nn
 
+from ..model.baseline import GRU4Rec
+
 
 class SoftmaxStochasticPolicyHead(nn.Module):
     def __init__(
@@ -71,3 +73,45 @@ class SoftmaxStochasticPolicyHead(nn.Module):
             log_items_prob = torch.log(self.softmax(logits))
 
         return log_items_prob
+
+
+class BehaviorPolicy(GRU4Rec):
+    def __init__(
+        self,
+        n_items: int,
+        hidden_size: int,
+        n_gru_layers: int = 1,
+        dropout: int = 0.4,
+        user_action_embedding_dim: int = -1,
+        n_actions: int = None,
+        padding_signal: int = None,
+    ):
+        super().__init__(
+            n_items,
+            hidden_size,
+            n_gru_layers=n_gru_layers,
+            dropout=dropout,
+            user_action_embedding_dim=user_action_embedding_dim,
+            n_actions=n_actions,
+            padding_signal=padding_signal,
+        )
+
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(
+        self, state: torch.FloatTensor, item_index: torch.LongTensor
+    ) -> torch.FloatTensor:
+        batch_size = item_index.size(0)
+        log_items_prob = self.log_probs(state)
+        log_item_prob = torch.cat(
+            [
+                log_items_prob[batch_idx][item_index[batch_idx]]
+                for batch_idx in range(batch_size)
+            ]
+        )
+
+        return log_item_prob.view(batch_size, -1)
+
+    def log_probs(self, state: torch.FloatTensor) -> torch.FloatTensor:
+        logits = self.output_layer(state)
+        return torch.log(self.softmax(logits))
