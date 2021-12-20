@@ -118,4 +118,4 @@ class BehaviorPolicy(GRU4Rec):
         return torch.log(self.softmax(logits))
 
     def struct_state(self, pack_padded_histories: PackedSequence) -> torch.FloatTensor:
-        return super()(pack_padded_histories)
+        return self.gru_layer(pack_padded_histories)
