@@ -2,20 +2,18 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
-from torch.nn.modules.loss import KLDivLoss
 from torch.optim.optimizer import Optimizer
 
 from .nn import StateTransitionNetwork
-from .policy import SoftmaxStochasticPolicyHead
+from .policy import BehaviorPolicy, SoftmaxStochasticPolicyHead
 
 
 class TopKOfflineREINFORCE(nn.Module):
     def __init__(
         self,
         pi_state_network: StateTransitionNetwork,
-        action_policy: SoftmaxStochasticPolicyHead,
-        beta_state_network: StateTransitionNetwork,
-        behavior_policy: SoftmaxStochasticPolicyHead,
+        action_policy_head: SoftmaxStochasticPolicyHead,
+        behavior_policy: BehaviorPolicy,
         action_policy_optimizer: Optimizer,
         behavior_policy_optimizer: Optimizer,
         weight_cap: float,
@@ -24,15 +22,11 @@ class TopKOfflineREINFORCE(nn.Module):
         super(TopKOfflineREINFORCE, self).__init__()
 
         self.pi_state_network = pi_state_network
-        self.action_policy = action_policy
-        self.beta_state_network = beta_state_network
+        self.action_policy_head = action_policy_head
         self.behavior_policy = behavior_policy
 
         self.weight_cap = weight_cap
         self.K = K
-
-        if self.behavior_policy.adaptive_softmax is False:
-            self.kl_div_loss = KLDivLoss(reduction="batchmean")
 
         self.action_policy_optimizer = action_policy_optimizer
         self.behavior_policy_optimizer = behavior_policy_optimizer
@@ -50,14 +44,24 @@ class TopKOfflineREINFORCE(nn.Module):
             weight, torch.mul(torch.ones_like(weight), self.weight_cap)
         )
 
-    def action_policy_loss(
+    def episodic_loss(
         self,
         pi_state: torch.FloatTensor,
         beta_state: torch.FloatTensor,
         item_index: torch.LongTensor,
         episodic_return: torch.FloatTensor,
     ) -> torch.FloatTensor:
-        log_action_policy_prob = self.action_policy(pi_state, item_index)
+        """
+
+        T: Length of the full episode from timestep t to (t+T-1)
+
+        pi_state (T-1, N1): N1-dimensional state representations of action policy at timestmp (t+1) ~ (t+T-1)
+        beta_state (T-1, N2): N2-dimensional state representations of behavior policy at timestmp (t+1) ~ (t+T-1)
+        item_index (T-1, 1): Item indices meaning "action" at timestep (t+1) ~ (t+T-1)
+        episodic_return (T-1, 1): Cumulative returns at timestmp (t+1) ~ (t+T-1)
+
+        """
+        log_action_policy_prob = self.action_policy_head(pi_state, item_index)
         action_policy_prob = torch.exp(log_action_policy_prob)
 
         behavior_policy_prob = torch.exp(
@@ -70,84 +74,32 @@ class TopKOfflineREINFORCE(nn.Module):
             behavior_policy_prob=behavior_policy_prob,
         )
 
-        return -torch.mean(
+        return -torch.sum(
             _importance_weight * _lambda_K * episodic_return * log_action_policy_prob,
             dim=0,
         )
 
-    def behavior_policy_loss(
-        self, beta_state: torch.FloatTensor, item_index: torch.LongTensor
-    ) -> torch.FloatTensor:
-        batch_size = item_index.size(0)
-        if self.behavior_policy.adaptive_softmax is True:
-            out = self.behavior_policy.softmax(beta_state, item_index.squeeze())
-            return out.loss
-        else:
-            assert beta_state.size(
-                -1
-            ) == self.behavior_policy.item_embeddings.weight.size(
-                -1
-            ), "State & item embedding vector size should match."
-            items_embedded = self.behavior_policy.item_embeddings(
-                self.behavior_policy.item_space
-            )
-            logits = torch.stack(
-                [
-                    torch.sum(s * items_embedded / self.behavior_policy.T, dim=1)
-                    for s in beta_state
-                ]
-            )
-            log_behavior_policy_probs = torch.log(self.behavior_policy.softmax(logits))
-            actual_action_probs = log_behavior_policy_probs.new_zeros(
-                log_behavior_policy_probs.size()
-            )
-            for batch_idx in range(batch_size):
-                actual_action_probs[batch_idx][item_index[batch_idx]] = 1.0
-            return self.kl_div_loss(log_behavior_policy_probs, actual_action_probs)
-
-    def update_action_policy(self, action_policy_loss: torch.FloatTensor):
-        self.action_policy_optimizer.zero_grad()
-        action_policy_loss.backward()
-        self.action_policy_optimizer.step()
-
-    def update_behavior_policy(self, behavior_policy_loss: torch.FloatTensor):
-        self.behavior_policy_optimizer.zero_grad()
-        behavior_policy_loss.backward()
-        self.behavior_policy_optimizer.step()
-
-    def update(
-        self,
-        action_policy_loss: torch.FloatTensor,
-        behavior_policy_loss: torch.FloatTensor,
-    ):
-        self.action_policy_optimizer.zero_grad()
-        self.behavior_policy_optimizer.zero_grad()
-
-        action_policy_loss.backward(retain_graph=True)
-        behavior_policy_loss.backward()
-
-        self.action_policy_optimizer.step()
-        self.behavior_policy_optimizer.step()
-
     def get_top_recommendations(
         self, state: torch.FloatTensor, M: int
     ) -> Tuple[torch.LongTensor, torch.FloatTensor]:
-        if self.action_policy.adaptive_softmax is True:
-            action_policy_probs = torch.exp(self.action_policy.log_probs(state))
+        if self.action_policy_head.adaptive_softmax is True:
+            action_policy_probs = torch.exp(self.action_policy_head.log_probs(state))
         else:
-            assert state.size(-1) == self.action_policy.item_embeddings.weight.size(
+            assert state.size(
+                -1
+            ) == self.action_policy_head.item_embeddings.weight.size(
                 -1
             ), "State & item embedding vector size should match."
-            items_embedded = self.action_policy.item_embeddings(
-                self.action_policy.item_space
+            items_embedded = self.action_policy_head.item_embeddings(
+                self.action_policy_head.item_space
             )
             logits = torch.stack(
                 [
-                    torch.sum(s * items_embedded / self.action_policy.T, dim=1)
+                    torch.sum(s * items_embedded / self.action_policy_head.T, dim=1)
                     for s in state.detach()
                 ]
             )
-            action_policy_probs = self.action_policy.softmax(logits)
+            action_policy_probs = self.action_policy_head.softmax(logits)
 
         sorted_indices = action_policy_probs.argsort(dim=1, descending=True)
         items = sorted_indices[:, :M]
@@ -174,15 +126,12 @@ class TopKOfflineREINFORCE(nn.Module):
         return recommendations
 
     def to(self, device: torch.device):
-        if self.action_policy.adaptive_softmax is True:
+        if self.action_policy_head.adaptive_softmax is True:
             return super().to(device)
         else:
             on_device = super().to(device)
-            on_device.action_policy.item_space = on_device.action_policy.item_space.to(
-                device
-            )
-            on_device.behavior_policy.item_space = (
-                on_device.behavior_policy.item_space.to(device)
+            on_device.action_policy_head.item_space = (
+                on_device.action_policy_head.item_space.to(device)
             )
             return on_device
 
@@ -193,7 +142,7 @@ class TopKOfflineREINFORCE(nn.Module):
         item_index: torch.LongTensor,
         episodic_return: torch.FloatTensor,
     ) -> torch.FloatTensor:
-        action_policy_prob = torch.exp(self.action_policy(pi_state, item_index))
+        action_policy_prob = torch.exp(self.action_policy_head(pi_state, item_index))
         behavior_policy_prob = torch.exp(self.behavior_policy(beta_state, item_index))
         importance_weight = torch.div(action_policy_prob, behavior_policy_prob)
         return torch.mul(importance_weight, episodic_return)
