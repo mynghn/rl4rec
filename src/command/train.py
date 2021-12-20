@@ -9,6 +9,7 @@ from tqdm import tqdm
 from ..dataset.retailrocket import Retailrocket4GRU4RecLoader, RetailrocketDataLoader
 from ..model.agent import TopKOfflineREINFORCE
 from ..model.baseline import GRU4Rec
+from ..model.policy import BehaviorPolicy
 
 
 def train_agent(
@@ -106,7 +107,7 @@ def train_agent(
 
 
 def train_GRU4Rec(
-    model: GRU4Rec,
+    model: Union[GRU4Rec, BehaviorPolicy],
     train_loader: Retailrocket4GRU4RecLoader,
     n_epochs: int,
     device: torch.device = torch.device("cpu"),
@@ -124,22 +125,26 @@ def train_GRU4Rec(
         for batch in tqdm(train_loader, desc="train"):
             batch = train_loader.to(batch=batch, device=device)
 
-            # 1. Build State
-            batch_logits, lengths = model(batch["pack_padded_histories"])
+            # 1. Build Logits
+            if isinstance(model, BehaviorPolicy):
+                state, lengths = model.struct_state(batch["pack_padded_histories"])
+                logits = model.log_probs(state)
+            else:
+                logits, lengths = model(batch["pack_padded_histories"])
 
             # 2. Compute TOP1 Loss
             items_appeared = set(chain(*[ep for ep in batch["item_episodes"]]))
             losses = []
-            for logits, length, item_episode in zip(
-                batch_logits, lengths, batch["item_episodes"]
+            for logit, length, item_episode in zip(
+                logits, lengths, batch["item_episodes"]
             ):
                 other_logits = []
                 relevant_logit = []
                 for i in range(length):
                     curr = item_episode[i + 1]
                     negative_samples = list(items_appeared - set(item_episode))
-                    other_logits.append(logits[i, negative_samples].view(1, -1))
-                    relevant_logit.append(logits[i, curr].view(1))
+                    other_logits.append(logit[i, negative_samples].view(1, -1))
+                    relevant_logit.append(logit[i, curr].view(1))
                 episode_loss = model.top1_loss(
                     torch.cat(other_logits), torch.cat(relevant_logit)
                 )
