@@ -309,7 +309,7 @@ class RetailrocketDataLoader(DataLoader):
 
 
 class RetailrocketEpisodeLoader(DataLoader):
-    non_tensors = ["item_episodes"]
+    non_tensors = ("item_episodes", "return_at_t")
 
     def __init__(
         self,
