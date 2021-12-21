@@ -135,8 +135,8 @@ def train_agent(
             for b in range(batch_size):
                 ep_len = lengths[b] + 1
                 episodic_loss = agent.episodic_loss(
-                    pi_state=pi_state[b, : ep_len - 1, :],
-                    beta_state=beta_state[b, : ep_len - 1, :],
+                    pi_state=pi_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
+                    beta_state=beta_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
                     item_index=torch.LongTensor(
                         batch["item_episodes"][b][1:ep_len]
                     ).view(ep_len - 1, 1),
