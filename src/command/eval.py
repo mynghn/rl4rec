@@ -1,126 +1,239 @@
 from collections import defaultdict
-from typing import DefaultDict, Dict, List
+from typing import DefaultDict, Dict, List, Optional, Union
 
 import numpy as np
 import torch
 from torch.nn.modules.loss import KLDivLoss
 from tqdm import tqdm
 
-from ..dataset.retailrocket import RetailrocketDataLoader
+from ..dataset.retailrocket import RetailrocketEpisodeLoader
 from ..model.agent import TopKOfflineREINFORCE
+from ..model.baseline import GRU4Rec
+from ..model.policy import BehaviorPolicy
 
 
-def evaluate_agent(
-    agent: TopKOfflineREINFORCE,
-    eval_loader: RetailrocketDataLoader,
+def evaluate_recommender(
+    model: Union[TopKOfflineREINFORCE, GRU4Rec],
+    eval_loader: RetailrocketEpisodeLoader,
     discount_factor: float,
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
+    K: int = None,
+    behavior_policy: Optional[BehaviorPolicy] = None,
 ) -> Dict[str, float]:
-    agent = agent.to(device)
-    agent.eval()
+    model = model.to(device)
+    model.eval()
+    kl_div_loss = KLDivLoss(reduction="mean", log_target=False)
 
-    kl_div_loss = KLDivLoss(reduction="sum", log_target=True)
-
-    expected_return_cumulative = 0.0
-    kl_div_sum = 0.0
-    precision_cumulatvie = 0.0
-    recall_cumulative = 0.0
-    ndcg_cumulative = 0.0
+    expected_return_cumulated = 0.0
+    kl_div_cumulated = 0.0
+    precision_cumulated = 0.0
+    recall_cumulated = 0.0
+    ndcg_cumulated = 0.0
     hit = 0
     users_hit = set()
 
     iter_cnt = 0
     users_total = set()
+
     with torch.no_grad():
-        for batch in tqdm(eval_loader, desc="eval"):
-            batch = eval_loader.to(batch=batch, device=device)
-            batch_size = len(batch["user_id"])
+        if isinstance(model, TopKOfflineREINFORCE):
+            K = model.K
+            ep_cnt = 0
+            for batch in tqdm(eval_loader, desc="eval"):
+                batch = eval_loader.to(batch=batch, device=device)
 
-            beta_state = agent.beta_state_network(
-                user_history=batch["user_history"],
-                user_feature_index=batch.get("user_feature_index"),
-                item_feature_index=batch.get("item_feature_index"),
-            )
-            pi_state = agent.pi_state_network(
-                user_history=batch["user_history"],
-                user_feature_index=batch.get("user_feature_index"),
-                item_feature_index=batch.get("item_feature_index"),
-            )
-
-            # 1. Expected return of Agent's policy over samples from eval data that follows behavior policy
-            item_index_tensor = (
-                torch.LongTensor([seq[0] for seq in batch["item_index_episode"]])
-                .view(batch_size, -1)
-                .to(device)
-            )
-            corrected_return = agent.get_corrected_return(
-                beta_state=beta_state,
-                pi_state=pi_state,
-                item_index=item_index_tensor,
-                episodic_return=batch["return"],
-            )
-            expected_return_cumulative += corrected_return.sum().cpu().item()
-
-            # 2. KL Divergence between Agent's policy & former behavior policy
-            log_action_policy_probs = agent.action_policy.log_probs(pi_state)
-            log_behavior_policy_probs = agent.behavior_policy.log_probs(beta_state)
-
-            kl_div_sum += kl_div_loss(
-                log_action_policy_probs, log_behavior_policy_probs
-            )
-
-            # 3. Compute metrics from traditional RecSys domain
-            recommended_item_indices, _ = agent.get_top_recommendations(
-                state=pi_state, M=agent.K
-            )
-
-            for user_id, actual_seq, reward_seq, recommendations in zip(
-                batch["user_id"],
-                batch["item_index_episode"],
-                batch["reward_episode"],
-                recommended_item_indices,
-            ):
-                recommendation_list = recommendations.tolist()
-
-                actual_item_set = set(actual_seq)
-                recommendation_set = set(recommendation_list)
-
-                true_positive = len(actual_item_set & recommendation_set)
-                if true_positive > 0:
-                    hit += 1
-                    users_hit.add(user_id)
-                precision = true_positive / len(recommendation_set)
-                recall = true_positive / len(actual_item_set)
-                ndcg = compute_ndcg(
-                    recommendations=recommendation_list,
-                    relevance_book=build_relevance_book(
-                        item_sequence=actual_seq,
-                        reward_sequence=reward_seq,
-                        discount_factor=discount_factor,
-                    ),
+                # Build States
+                beta_state, _ = model.behavior_policy.struct_state(
+                    batch["pack_padded_histories"]
                 )
 
-                precision_cumulatvie += precision
-                recall_cumulative += recall
-                ndcg_cumulative += ndcg
+                pi_state, lengths = model.pi_state_network(
+                    batch["pack_padded_histories"]
+                )
 
-                if debug:
-                    print(f"User: {user_id}")
-                    print(f"1. Precision: {precision:2.%}")
-                    print(f"1. Recall: {recall:2.%}")
-                    print(f"1. nDCG: {ndcg:2.%}")
-                    print("=" * 20)
+                batch_size = len(batch["item_episodes"])
+                for b in range(batch_size):
+                    ep_len = lengths[b] + 1
+                    # 1. Expected return of model's policy over samples from eval data that follows behavior policy
+                    expected_return_cumulated += model.get_corrected_episodic_return(
+                        pi_state=pi_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
+                        beta_state=beta_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
+                        item_index=torch.LongTensor(
+                            batch["item_episodes"][b][1:ep_len]
+                        ).view(ep_len - 1, 1),
+                        return_at_t=torch.FloatTensor(
+                            batch["return_at_t"][b][1:ep_len]
+                        ).view(ep_len - 1, 1),
+                    )
 
-            iter_cnt += batch_size
-            users_total |= set(batch["user_id"])
+                    behavior_policy_probs = torch.exp(
+                        model.behavior_policy(
+                            state=beta_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
+                            item_index=torch.LongTensor(
+                                batch["item_episodes"][b][1:ep_len]
+                            ).view(ep_len - 1, 1),
+                        )
+                    )
+                    model_probs = torch.exp(
+                        model.action_policy_head(
+                            state=pi_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
+                            item_index=torch.LongTensor(
+                                batch["item_episodes"][b][1:ep_len]
+                            ).view(ep_len - 1, 1),
+                        )
+                    )
+
+                    # 2. KL Divergence between Agent's policy & former behavior policy
+                    kl_div_cumulated += (
+                        kl_div_loss(model_probs, behavior_policy_probs).cpu().item()
+                    )
+
+                    # 3. Compute metrics from traditional RecSys domain
+                    recommended_item_indices = model.get_top_recommendations(
+                        pi_state[b, : ep_len - 1, :].view(ep_len - 1, -1), M=K
+                    )
+
+                    ep_cnt += 1
+
+                    for t, user_id, recommendations in zip(
+                        range(1, ep_len), batch["user_id"], recommended_item_indices
+                    ):
+                        recommendation_list = recommendations.tolist()
+                        actual_seq = batch["item_episodes"][b][t:]
+                        reward_seq = batch["return_at_t"][b][t:]
+                        actual_item_set = set(actual_seq)
+                        recommendation_set = set(recommendation_list)
+
+                        true_positive = len(actual_item_set & recommendation_set)
+                        if true_positive > 0:
+                            hit += 1
+                            users_hit.add(user_id)
+                        precision = true_positive / len(recommendation_set)
+                        recall = true_positive / len(actual_item_set)
+                        ndcg = compute_ndcg(
+                            recommendations=recommendation_list,
+                            relevance_book=build_relevance_book(
+                                item_sequence=actual_seq,
+                                reward_sequence=reward_seq,
+                                discount_factor=discount_factor,
+                            ),
+                        )
+
+                        precision_cumulated += precision
+                        recall_cumulated += recall
+                        ndcg_cumulated += ndcg
+
+                        if debug:
+                            print(f"User: {user_id}")
+                            print(f"1. Precision: {precision:2.%}")
+                            print(f"1. Recall: {recall:2.%}")
+                            print(f"1. nDCG: {ndcg:2.%}")
+                            print("=" * 20)
+
+                        iter_cnt += 1
+
+                users_total |= set(batch["user_id"])
+
+            expected_return = expected_return_cumulated / ep_cnt
+            kl_div = kl_div_cumulated / ep_cnt
+
+        elif isinstance(model, GRU4Rec):
+            assert behavior_policy is not None and K is not None
+            batch_cnt = 0
+            ep_cnt = 0
+            for batch in tqdm(eval_loader, desc="eval"):
+                batch = eval_loader.to(batch=batch, device=device)
+
+                # 1. Expected return of model's policy over samples from eval data that follows behavior policy
+                batch_model_probs, _ = model.get_probs(batch["pack_padded_histories"])
+                beta_state, lengths = behavior_policy.struct_state(
+                    batch["pack_padded_histories"]
+                )
+                batch_behavior_policy_probs = torch.exp(
+                    behavior_policy.log_probs(beta_state)
+                )
+                expected_return_cumulated += model.get_corrected_batch_return(
+                    model_probs=batch_model_probs,
+                    behavior_policy_probs=batch_behavior_policy_probs,
+                    lengths=lengths,
+                    item_index=batch["item_episodes"],
+                    return_at_t=batch["return_at_t"],
+                )
+
+                # Recommendations
+                recommended_item_indices = model.recommend(
+                    batch["pack_padded_histories"], K
+                )
+
+                batch_size = len(batch["item_episodes"])
+                for b in range(batch_size):
+                    ep_len = lengths[b] + 1
+                    # 2. KL Divergence between Agent's policy & former behavior policy
+                    behavior_policy_probs = batch_behavior_policy_probs[
+                        b, : ep_len - 1, batch["item_episodes"][b][1:ep_len]
+                    ].view(ep_len - 1, -1)
+                    model_probs = batch_model_probs[
+                        b, : ep_len - 1, batch["item_episodes"][b][1:ep_len]
+                    ].view(ep_len - 1, -1)
+                    kl_div_cumulated += (
+                        kl_div_loss(model_probs, behavior_policy_probs).cpu().item()
+                    )
+
+                    ep_cnt += 1
+
+                    # 3. Compute metrics from traditional RecSys domain
+                    for t, user_id, recommendations in zip(
+                        range(1, ep_len), batch["user_id"], recommended_item_indices[b]
+                    ):
+                        recommendation_list = recommendations.tolist()
+                        actual_seq = batch["item_episodes"][b][t:]
+                        reward_seq = batch["return_at_t"][b][t:]
+                        actual_item_set = set(actual_seq)
+                        recommendation_set = set(recommendation_list)
+
+                        true_positive = len(actual_item_set & recommendation_set)
+                        if true_positive > 0:
+                            hit += 1
+                            users_hit.add(user_id)
+                        precision = true_positive / len(recommendation_set)
+                        recall = true_positive / len(actual_item_set)
+                        ndcg = compute_ndcg(
+                            recommendations=recommendation_list,
+                            relevance_book=build_relevance_book(
+                                item_sequence=actual_seq,
+                                reward_sequence=reward_seq,
+                                discount_factor=discount_factor,
+                            ),
+                        )
+
+                        precision_cumulated += precision
+                        recall_cumulated += recall
+                        ndcg_cumulated += ndcg
+
+                        if debug:
+                            print(f"User: {user_id}")
+                            print(f"1. Precision: {precision:2.%}")
+                            print(f"1. Recall: {recall:2.%}")
+                            print(f"1. nDCG: {ndcg:2.%}")
+                            print("=" * 20)
+
+                        iter_cnt += 1
+
+                users_total |= set(batch["user_id"])
+                batch_cnt += 1
+
+            expected_return = expected_return_cumulated / batch_cnt
+            kl_div = kl_div_cumulated / ep_cnt
+        else:
+            raise TypeError("Unregistered recommender type encountered.")
 
     return {
-        "E[Return]": expected_return_cumulative / iter_cnt,
-        "KL-Divergence(Pi|Beta)": kl_div_sum / iter_cnt,
-        f"Precision at {agent.K}": precision_cumulatvie / iter_cnt,
-        f"Recall at {agent.K}": recall_cumulative / iter_cnt,
-        f"nDCG at {agent.K}": ndcg_cumulative / iter_cnt,
+        "E[Return]": expected_return,
+        "KL-Divergence(Pi|Beta)": kl_div,
+        f"Precision at {K}": precision_cumulated / iter_cnt,
+        f"Recall at {K}": recall_cumulated / iter_cnt,
+        f"nDCG at {K}": ndcg_cumulated / iter_cnt,
         "Hit Rate": hit / iter_cnt,
         "User Hit Rate": len(users_hit) / len(users_total),
     }
