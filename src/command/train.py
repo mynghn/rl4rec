@@ -26,7 +26,7 @@ def train_GRU4Rec(
     train_loss_log = []
     for epoch in range(1, n_epochs + 1):
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        print(f"\nEpoch {epoch} for {model.__name__} started at: {start_time}\n")
+        print(f"\nEpoch {epoch} for {model._get_name()} started at: {start_time}\n")
 
         iter_cnt = 0
         for batch in tqdm(train_loader, desc="train"):
@@ -128,7 +128,7 @@ def train_agent(
     action_policy_loss_log = []
     for epoch in range(1, n_epochs_pi + 1):
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        print(f"\nEpoch {epoch} for {agent.__name__}\nstarted at: {start_time}\n")
+        print(f"\nEpoch {epoch} for {agent._get_name()}\nstarted at: {start_time}\n")
 
         iter_cnt = 0
         for batch in tqdm(train_loader, desc="train"):
