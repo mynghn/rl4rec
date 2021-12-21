@@ -140,7 +140,7 @@ def train_agent(
                     item_index=torch.LongTensor(
                         batch["item_episodes"][b][1:ep_len]
                     ).view(ep_len - 1, 1),
-                    episodic_return=torch.FloatTensor(
+                    return_at_t=torch.FloatTensor(
                         batch["return_at_t"][b][1:ep_len]
                     ).view(ep_len - 1, 1),
                 )
