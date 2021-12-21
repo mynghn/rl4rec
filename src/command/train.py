@@ -18,7 +18,7 @@ def train_GRU4Rec(
     n_epochs: int,
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
-) -> Optional[Tuple[List[float], List[float]]]:
+) -> Optional[List[float]]:
     model = model.to(device)
     model.train()
     optimizer = Adam(model.parameters())
@@ -66,14 +66,16 @@ def train_GRU4Rec(
             if debug is True:
                 train_loss_log.append(loss.cpu().item())
 
-            if device.type == "cuda":
-                torch.cuda.empty_cache()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
         if debug is True:
             print(f"Epoch {epoch} Final loss: {loss.cpu().item()}")
+
         print("=" * 80)
 
-    return train_loss_log
+    if debug is True:
+        return train_loss_log
 
 
 def train_agent(
@@ -161,6 +163,9 @@ def train_agent(
 
             if debug is True:
                 action_policy_loss_log.append(action_policy_loss.cpu().item())
+
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
         if debug is True:
             print(f"Final action policy loss: {action_policy_loss.cpu().item()}")
