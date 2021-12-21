@@ -156,8 +156,8 @@ class TopKOfflineREINFORCE(nn.Module):
         ).squeeze()
 
         episodic_return_cumulated = 0.0
-        ep_len = item_index.size(0)
-        for t in range(ep_len):
+        hist_len = item_index.size(0)
+        for t in range(hist_len):
             importance_weight = action_policy_probs_in_episode[t:] @ (
                 1 / behavior_policy_probs_in_episode[t:]
             )
@@ -165,4 +165,4 @@ class TopKOfflineREINFORCE(nn.Module):
                 importance_weight.cpu().item() * return_at_t[t, 0].cpu().item()
             )
 
-        return episodic_return_cumulated / ep_len
+        return episodic_return_cumulated / hist_len
