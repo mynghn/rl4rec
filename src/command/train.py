@@ -150,9 +150,9 @@ def train_agent(
             action_policy_loss = torch.cat(losses).mean()
 
             # 3. Gradient update agent w/ computed losses
-            agent.action_policy_optimizer.zero_grad()
+            agent_optimizer.zero_grad()
             action_policy_loss.backward()
-            agent.action_policy_optimizer.step()
+            agent_optimizer.step()
 
             if debug is True:
                 action_policy_loss_log.append(action_policy_loss.cpu().item())
