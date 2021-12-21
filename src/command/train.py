@@ -17,6 +17,7 @@ def train_GRU4Rec(
     optimizer: Optimizer,
     train_loader: RetailrocketEpisodeLoader,
     n_epochs: int,
+    cache_cycle: int,
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
 ) -> Optional[List[float]]:
@@ -67,7 +68,7 @@ def train_GRU4Rec(
                 train_loss_log.append(loss.cpu().item())
 
             iter_cnt += 1
-            if device.type == "cuda" and iter_cnt % 1000 == 0:
+            if device.type == "cuda" and iter_cnt % cache_cycle == 0:
                 torch.cuda.empty_cache()
 
         if debug is True:
@@ -84,6 +85,7 @@ def train_agent(
     agent_optimizer: Optimizer,
     train_loader: RetailrocketEpisodeLoader,
     n_epochs: Union[int, Tuple[int]],
+    cache_cycle: Union[int, Tuple[int]],
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
     behavior_policy_pretrained: bool = False,
@@ -97,6 +99,14 @@ def train_agent(
         raise TypeError(
             f"Unregistered {type(n_epochs)} type n_epochs entered.: {n_epochs}"
         )
+    if isinstance(cache_cycle, int):
+        cache_cycle_beta = cache_cycle_pi = cache_cycle
+    elif isinstance(cache_cycle, tuple):
+        cache_cycle_beta, cache_cycle_pi = cache_cycle
+    else:
+        raise TypeError(
+            f"Unregistered {type(cache_cycle)} type cache_cycle entered.: {cache_cycle}"
+        )
 
     # 1. Train behavior policy first
     if behavior_policy_pretrained is False:
@@ -107,6 +117,7 @@ def train_agent(
             optimizer=behavior_policy_optimizer,
             train_loader=train_loader,
             n_epochs=n_epochs_beta,
+            cache_cycle=cache_cycle_beta,
             device=device,
             debug=debug,
         )
@@ -158,7 +169,7 @@ def train_agent(
                 action_policy_loss_log.append(action_policy_loss.cpu().item())
 
             iter_cnt += 1
-            if device.type == "cuda" and iter_cnt % 1000 == 0:
+            if device.type == "cuda" and iter_cnt % cache_cycle_pi == 0:
                 torch.cuda.empty_cache()
 
         if debug is True:
