@@ -309,8 +309,6 @@ class RetailrocketDataLoader(DataLoader):
 
 
 class RetailrocketEpisodeLoader(DataLoader):
-    non_tensors = ("item_episodes", "return_at_t", "user_id")
-
     def __init__(
         self,
         dataset: RetailrocketEpisodeDataset,
@@ -404,6 +402,13 @@ class RetailrocketEpisodeLoader(DataLoader):
         on_device = {
             k: v.to(device) for k, v in batch.items() if k not in self.non_tensors
         }
-        for k in self.non_tensors:
+
+        if self.train is True:
+            non_tensors = ("item_episodes", "return_at_t")
+        else:
+            non_tensors = ("item_episodes", "return_at_t", "user_id")
+
+        for k in non_tensors:
             on_device[k] = batch[k]
+
         return on_device
