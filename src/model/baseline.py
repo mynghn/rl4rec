@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
@@ -18,6 +18,7 @@ from pyspark.sql.functions import (
     udf,
 )
 from pyspark.sql.types import FloatType, StructField, StructType
+from torch.nn.functional import softmax
 from torch.nn.modules.rnn import PackedSequence
 
 from ..model.nn import StateTransitionNetwork
@@ -67,6 +68,45 @@ class GRU4Rec(nn.Module):
             + torch.sigmoid(other_logits ** 2),
             dim=1,
         )
+
+    def recommend(
+        self, pack_padded_histories: PackedSequence, K: int
+    ) -> List[List[List[int]]]:
+        out, lengths = self.forward(pack_padded_histories)
+        recommendations = []
+        for ep_logits, length in zip(out, lengths):
+            ep_recom = []
+            for i in range(length):
+                sorted_indices = ep_logits[i, :].argsort(dim=1, descending=True)
+                items = sorted_indices[:K]
+                ep_recom.append(items)
+            recommendations.append(ep_recom)
+        return recommendations
+
+    def get_corrected_batch_return(
+        self,
+        pack_padded_histories: PackedSequence,
+        behavior_policy_probs: torch.FloatTensor,
+        item_episodes: Sequence[Sequence[float]],
+        return_at_t: Sequence[Sequence[float]],
+    ) -> float:
+        logits, lengths = self(pack_padded_histories)
+        model_probs = softmax(logits)
+
+        batch_size = len(lengths)
+        corrected_return_cumulated = 0.0
+        cnt = 0
+        for b in range(batch_size):
+            for t in range(lengths[b]):
+                item_index_in_episode = item_episodes[b][t + 1 :]
+                importance_weight = model_probs[b, t, item_index_in_episode] @ (
+                    1 / behavior_policy_probs[b, t, item_index_in_episode]
+                )
+                corrected_return_cumulated += (
+                    importance_weight.cpu().item() * return_at_t[b][t + 1]
+                )
+                cnt += 1
+        return corrected_return_cumulated / cnt
 
 
 class CollaborativeFiltering:
