@@ -2,7 +2,6 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
-from torch.optim.optimizer import Optimizer
 
 from .nn import StateTransitionNetwork
 from .policy import BehaviorPolicy, SoftmaxStochasticPolicyHead
@@ -14,8 +13,6 @@ class TopKOfflineREINFORCE(nn.Module):
         pi_state_network: StateTransitionNetwork,
         action_policy_head: SoftmaxStochasticPolicyHead,
         behavior_policy: BehaviorPolicy,
-        action_policy_optimizer: Optimizer,
-        behavior_policy_optimizer: Optimizer,
         weight_cap: float,
         K: int,
     ):
@@ -27,9 +24,6 @@ class TopKOfflineREINFORCE(nn.Module):
 
         self.weight_cap = weight_cap
         self.K = K
-
-        self.action_policy_optimizer = action_policy_optimizer
-        self.behavior_policy_optimizer = behavior_policy_optimizer
 
     def _compute_lambda_K(self, policy_prob: torch.FloatTensor) -> torch.FloatTensor:
         return self.K * ((1 - policy_prob) ** (self.K - 1))

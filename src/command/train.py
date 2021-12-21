@@ -3,7 +3,7 @@ from itertools import chain
 from typing import List, Optional, Tuple, Union
 
 import torch
-from torch.optim import Adam
+from torch.optim.optimizer import Optimizer
 from tqdm import tqdm
 
 from ..dataset.retailrocket import RetailrocketEpisodeLoader
@@ -14,19 +14,18 @@ from ..model.policy import BehaviorPolicy
 
 def train_GRU4Rec(
     model: Union[GRU4Rec, BehaviorPolicy],
+    optimizer: Optimizer,
     train_loader: RetailrocketEpisodeLoader,
     n_epochs: int,
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
 ) -> Optional[List[float]]:
-    model = model.to(device)
     model.train()
-    optimizer = Adam(model.parameters())
 
     train_loss_log = []
     for epoch in range(1, n_epochs + 1):
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        print(f"\nEpoch {epoch} started at: {start_time}\n")
+        print(f"\nEpoch {epoch} for {model.__name__} started at: {start_time}\n")
 
         iter_cnt = 0
         for batch in tqdm(train_loader, desc="train"):
@@ -82,14 +81,14 @@ def train_GRU4Rec(
 
 def train_agent(
     agent: TopKOfflineREINFORCE,
+    agent_optimizer: Optimizer,
     train_loader: RetailrocketEpisodeLoader,
     n_epochs: Union[int, Tuple[int]],
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
     behavior_policy_pretrained: bool = False,
+    behavior_policy_optimizer: Optimizer = None,
 ) -> Optional[Tuple[List[float], List[float]]]:
-    agent = agent.to(device)
-
     if isinstance(n_epochs, int):
         n_epochs_beta = n_epochs_pi = n_epochs
     elif isinstance(n_epochs, tuple):
@@ -101,9 +100,11 @@ def train_agent(
 
     # 1. Train behavior policy first
     if behavior_policy_pretrained is False:
+        assert behavior_policy_optimizer is not None
         agent.behavior_policy.train()
         behavior_policy_loss_log = train_GRU4Rec(
             model=agent.behavior_policy,
+            optimizer=behavior_policy_optimizer,
             train_loader=train_loader,
             n_epochs=n_epochs_beta,
             device=device,
@@ -116,7 +117,7 @@ def train_agent(
     action_policy_loss_log = []
     for epoch in range(1, n_epochs_pi + 1):
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        print(f"\nEpoch {epoch} for action policy\nstarted at: {start_time}\n")
+        print(f"\nEpoch {epoch} for {agent.__name__}\nstarted at: {start_time}\n")
 
         iter_cnt = 0
         for batch in tqdm(train_loader, desc="train"):
