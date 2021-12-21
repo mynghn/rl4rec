@@ -28,6 +28,7 @@ def train_GRU4Rec(
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         print(f"\nEpoch {epoch} started at: {start_time}\n")
 
+        iter_cnt = 0
         for batch in tqdm(train_loader, desc="train"):
             batch = train_loader.to(batch=batch, device=device)
 
@@ -39,18 +40,18 @@ def train_GRU4Rec(
                 logits, lengths = model(batch["pack_padded_histories"])
 
             # 2. Compute TOP1 Loss
+            batch_size = len(batch["item_episodes"])
             items_appeared = set(chain(*[ep for ep in batch["item_episodes"]]))
             losses = []
-            for logit, length, item_episode in zip(
-                logits, lengths, batch["item_episodes"]
-            ):
+            for b in range(batch_size):
                 other_logits = []
                 relevant_logit = []
-                for i in range(length):
-                    curr = item_episode[i + 1]
+                for t in range(lengths[b]):
+                    item_episode = batch["item_episodes"][b]
+                    curr = item_episode[t + 1]
                     negative_samples = list(items_appeared - set(item_episode))
-                    other_logits.append(logit[i, negative_samples].view(1, -1))
-                    relevant_logit.append(logit[i, curr].view(1))
+                    other_logits.append(logits[b, t, negative_samples].view(1, -1))
+                    relevant_logit.append(logits[b, t, curr].view(1))
                 episode_loss = model.top1_loss(
                     torch.cat(other_logits), torch.cat(relevant_logit)
                 )
@@ -66,8 +67,9 @@ def train_GRU4Rec(
             if debug is True:
                 train_loss_log.append(loss.cpu().item())
 
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
+            iter_cnt += 1
+            if device.type == "cuda" and iter_cnt % 1000 == 0:
+                torch.cuda.empty_cache()
 
         if debug is True:
             print(f"Epoch {epoch} Final loss: {loss.cpu().item()}")
@@ -116,6 +118,7 @@ def train_agent(
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         print(f"\nEpoch {epoch} for action policy\nstarted at: {start_time}\n")
 
+        iter_cnt = 0
         for batch in tqdm(train_loader, desc="train"):
             batch = train_loader.to(batch=batch, device=device)
 
@@ -127,30 +130,19 @@ def train_agent(
             pi_state, lengths = agent.pi_state_network(batch["pack_padded_histories"])
 
             # 2. Compute Policy Loss
+            batch_size = len(batch["item_episodes"])
             losses = []
-            for (
-                ep_pi_state,
-                ep_beta_state,
-                hist_len,
-                ep_item_index,
-                ep_return_at_t,
-            ) in zip(
-                pi_state,
-                beta_state,
-                lengths,
-                batch["item_episodes"],
-                batch["return_at_t"],
-            ):
-                ep_len = hist_len + 1
+            for b in range(batch_size):
+                ep_len = lengths[b] + 1
                 episodic_loss = agent.episodic_loss(
-                    pi_state=ep_pi_state[:hist_len, :],
-                    beta_state=ep_beta_state[:hist_len, :],
-                    item_index=torch.LongTensor(ep_item_index[1:ep_len]).view(
-                        hist_len, 1
-                    ),
-                    episodic_return=torch.FloatTensor(ep_return_at_t[1:ep_len]).view(
-                        hist_len, 1
-                    ),
+                    pi_state=pi_state[b, : ep_len - 1, :],
+                    beta_state=beta_state[b, : ep_len - 1, :],
+                    item_index=torch.LongTensor(
+                        batch["item_episodes"][b][1:ep_len]
+                    ).view(ep_len - 1, 1),
+                    episodic_return=torch.FloatTensor(
+                        batch["return_at_t"][b][1:ep_len]
+                    ).view(ep_len - 1, 1),
                 )
 
                 losses.append(episodic_loss.view(1))
@@ -164,8 +156,9 @@ def train_agent(
             if debug is True:
                 action_policy_loss_log.append(action_policy_loss.cpu().item())
 
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
+            iter_cnt += 1
+            if device.type == "cuda" and iter_cnt % 1000 == 0:
+                torch.cuda.empty_cache()
 
         if debug is True:
             print(f"Final action policy loss: {action_policy_loss.cpu().item()}")
