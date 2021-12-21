@@ -49,17 +49,15 @@ class TopKOfflineREINFORCE(nn.Module):
         pi_state: torch.FloatTensor,
         beta_state: torch.FloatTensor,
         item_index: torch.LongTensor,
-        episodic_return: torch.FloatTensor,
+        return_at_t: torch.FloatTensor,
     ) -> torch.FloatTensor:
         """
-
         T: Length of the full episode from timestep t to (t+T-1)
 
         pi_state (T-1, N1): N1-dimensional state representations of action policy at timestmp (t+1) ~ (t+T-1)
         beta_state (T-1, N2): N2-dimensional state representations of behavior policy at timestmp (t+1) ~ (t+T-1)
         item_index (T-1, 1): Item indices meaning "action" at timestep (t+1) ~ (t+T-1)
-        episodic_return (T-1, 1): Cumulative returns at timestmp (t+1) ~ (t+T-1)
-
+        return_at_t (T-1, 1): Cumulative returns at timestmp (t+1) ~ (t+T-1)
         """
         log_action_policy_prob = self.action_policy_head(pi_state, item_index)
         action_policy_prob = torch.exp(log_action_policy_prob)
@@ -75,7 +73,7 @@ class TopKOfflineREINFORCE(nn.Module):
         )
 
         return -torch.sum(
-            _importance_weight * _lambda_K * episodic_return * log_action_policy_prob,
+            _importance_weight * _lambda_K * return_at_t * log_action_policy_prob,
             dim=0,
         )
 
@@ -135,14 +133,36 @@ class TopKOfflineREINFORCE(nn.Module):
             )
             return on_device
 
-    def get_corrected_return(
+    def get_corrected_episodic_return(
         self,
         pi_state: torch.FloatTensor,
         beta_state: torch.FloatTensor,
         item_index: torch.LongTensor,
-        episodic_return: torch.FloatTensor,
-    ) -> torch.FloatTensor:
-        action_policy_prob = torch.exp(self.action_policy_head(pi_state, item_index))
-        behavior_policy_prob = torch.exp(self.behavior_policy(beta_state, item_index))
-        importance_weight = torch.div(action_policy_prob, behavior_policy_prob)
-        return torch.mul(importance_weight, episodic_return)
+        return_at_t: torch.FloatTensor,
+    ) -> float:
+        """
+        T: Length of the full episode from timestep t to (t+T-1)
+
+        pi_state (T-1, N1): N1-dimensional state representations of action policy at timestmp (t+1) ~ (t+T-1)
+        beta_state (T-1, N2): N2-dimensional state representations of behavior policy at timestmp (t+1) ~ (t+T-1)
+        item_index (T-1, 1): Item indices meaning "action" at timestep (t+1) ~ (t+T-1)
+        return_at_t (T-1, 1): Cumulative returns at timestmp (t+1) ~ (t+T-1)
+        """
+        action_policy_probs_in_episode = torch.exp(
+            self.action_policy_head(pi_state, item_index)
+        ).squeeze()
+        behavior_policy_probs_in_episode = torch.exp(
+            self.behavior_policy(beta_state, item_index)
+        ).squeeze()
+
+        episodic_return_cumulated = 0.0
+        ep_len = item_index.size(0)
+        for t in range(ep_len):
+            importance_weight = action_policy_probs_in_episode[t:] @ (
+                1 / behavior_policy_probs_in_episode[t:]
+            )
+            episodic_return_cumulated += (
+                importance_weight.cpu().item() * return_at_t[t, 0].cpu().item()
+            )
+
+        return episodic_return_cumulated / ep_len
