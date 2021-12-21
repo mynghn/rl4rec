@@ -46,12 +46,12 @@ def train_GRU4Rec(
             for b in range(batch_size):
                 other_logits = []
                 relevant_logit = []
-                for t in range(lengths[b]):
+                for t in range(1, lengths[b] + 1):
                     item_episode = batch["item_episodes"][b]
-                    curr = item_episode[t + 1]
+                    curr = item_episode[t]
                     negative_samples = list(items_appeared - set(item_episode))
-                    other_logits.append(logits[b, t, negative_samples].view(1, -1))
-                    relevant_logit.append(logits[b, t, curr].view(1))
+                    other_logits.append(logits[b, t - 1, negative_samples].view(1, -1))
+                    relevant_logit.append(logits[b, t - 1, curr].view(1))
                 episode_loss = model.top1_loss(
                     torch.cat(other_logits), torch.cat(relevant_logit)
                 )
