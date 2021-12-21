@@ -83,16 +83,18 @@ class GRU4Rec(nn.Module):
             recommendations.append(ep_recom)
         return recommendations
 
+    def get_probs(self, pack_padded_histories: PackedSequence) -> torch.FloatTensor:
+        logits, lengths = self(pack_padded_histories)
+        return softmax(logits), lengths
+
     def get_corrected_batch_return(
         self,
-        pack_padded_histories: PackedSequence,
+        model_probs: torch.FloatTensor,
         behavior_policy_probs: torch.FloatTensor,
+        lengths: torch.LongTensor,
         item_index: Sequence[Sequence[float]],
         return_at_t: Sequence[Sequence[float]],
     ) -> float:
-        logits, lengths = self(pack_padded_histories)
-        model_probs = softmax(logits)
-
         batch_size = len(lengths)
         batch_return_cumulated = 0.0
         for b in range(batch_size):
