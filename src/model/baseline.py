@@ -87,7 +87,7 @@ class GRU4Rec(nn.Module):
         self,
         pack_padded_histories: PackedSequence,
         behavior_policy_probs: torch.FloatTensor,
-        item_episodes: Sequence[Sequence[float]],
+        item_index: Sequence[Sequence[float]],
         return_at_t: Sequence[Sequence[float]],
     ) -> float:
         logits, lengths = self(pack_padded_histories)
@@ -98,12 +98,12 @@ class GRU4Rec(nn.Module):
         cnt = 0
         for b in range(batch_size):
             for t in range(lengths[b]):
-                item_index_in_episode = item_episodes[b][t + 1 :]
+                item_index_in_episode = item_index[b][t:]
                 importance_weight = model_probs[b, t, item_index_in_episode] @ (
                     1 / behavior_policy_probs[b, t, item_index_in_episode]
                 )
                 corrected_return_cumulated += (
-                    importance_weight.cpu().item() * return_at_t[b][t + 1]
+                    importance_weight.cpu().item() * return_at_t[b][t]
                 )
                 cnt += 1
         return corrected_return_cumulated / cnt
