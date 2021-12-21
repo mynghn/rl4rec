@@ -97,10 +97,10 @@ class GRU4Rec(nn.Module):
         corrected_return_cumulated = 0.0
         cnt = 0
         for b in range(batch_size):
-            for t in range(lengths[b]):
+            for t in range(1, lengths[b] + 1):
                 item_index_in_episode = item_index[b][t:]
-                importance_weight = model_probs[b, t, item_index_in_episode] @ (
-                    1 / behavior_policy_probs[b, t, item_index_in_episode]
+                importance_weight = model_probs[b, t - 1, item_index_in_episode] @ (
+                    1 / behavior_policy_probs[b, t - 1, item_index_in_episode]
                 )
                 corrected_return_cumulated += (
                     importance_weight.cpu().item() * return_at_t[b][t]
