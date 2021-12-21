@@ -94,17 +94,17 @@ class GRU4Rec(nn.Module):
         model_probs = softmax(logits)
 
         batch_size = len(lengths)
-        corrected_return_cumulated = 0.0
+        batch_return_cumulated = 0.0
         for b in range(batch_size):
+            ep_return = 0.0
             for t in range(1, lengths[b] + 1):
                 item_index_in_episode = item_index[b][t:]
                 importance_weight = model_probs[b, t - 1, item_index_in_episode] @ (
                     1 / behavior_policy_probs[b, t - 1, item_index_in_episode]
                 )
-                corrected_return_cumulated += (
-                    importance_weight.cpu().item() * return_at_t[b][t]
-                )
-        return corrected_return_cumulated
+                ep_return += importance_weight.cpu().item() * return_at_t[b][t]
+            batch_return_cumulated += ep_return / lengths[b]
+        return batch_return_cumulated / batch_size
 
 
 class CollaborativeFiltering:

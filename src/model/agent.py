@@ -165,4 +165,4 @@ class TopKOfflineREINFORCE(nn.Module):
                 importance_weight.cpu().item() * return_at_t[t, 0].cpu().item()
             )
 
-        return episodic_return_cumulated
+        return episodic_return_cumulated / hist_len
