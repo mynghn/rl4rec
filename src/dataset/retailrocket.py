@@ -309,7 +309,7 @@ class RetailrocketDataLoader(DataLoader):
 
 
 class RetailrocketEpisodeLoader(DataLoader):
-    non_tensors = ("item_episodes", "return_at_t")
+    non_tensors = ("item_episodes", "return_at_t", "user_id")
 
     def __init__(
         self,
@@ -395,16 +395,10 @@ class RetailrocketEpisodeLoader(DataLoader):
 
     def eval_collate_func(
         self, batch: List[np.ndarray]
-    ) -> Dict[
-        str,
-        Union[
-            List[str],
-            PaddedNSortedEpisodeBatch,
-            List[List[int]],
-            List[List[float]],
-        ],
-    ]:
-        pass
+    ) -> Dict[str, Union[PackedSequence, np.ndarray, List[int]]]:
+        data = self.train_collate_func(batch)
+        data["user_id"] = list(tuple(np.array(batch, dtype=object).T)[0])
+        return data
 
     def to(self, batch: Dict, device: torch.device) -> Dict:
         on_device = {
