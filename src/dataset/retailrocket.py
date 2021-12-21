@@ -399,14 +399,12 @@ class RetailrocketEpisodeLoader(DataLoader):
         return data
 
     def to(self, batch: Dict, device: torch.device) -> Dict:
-        on_device = {
-            k: v.to(device) for k, v in batch.items() if k not in self.non_tensors
-        }
-
         if self.train is True:
             non_tensors = ("item_episodes", "return_at_t")
         else:
             non_tensors = ("item_episodes", "return_at_t", "user_id")
+
+        on_device = {k: v.to(device) for k, v in batch.items() if k not in non_tensors}
 
         for k in non_tensors:
             on_device[k] = batch[k]
