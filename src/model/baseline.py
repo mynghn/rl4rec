@@ -95,7 +95,6 @@ class GRU4Rec(nn.Module):
 
         batch_size = len(lengths)
         corrected_return_cumulated = 0.0
-        cnt = 0
         for b in range(batch_size):
             for t in range(1, lengths[b] + 1):
                 item_index_in_episode = item_index[b][t:]
@@ -105,8 +104,7 @@ class GRU4Rec(nn.Module):
                 corrected_return_cumulated += (
                     importance_weight.cpu().item() * return_at_t[b][t]
                 )
-                cnt += 1
-        return corrected_return_cumulated / cnt
+        return corrected_return_cumulated
 
 
 class CollaborativeFiltering:
