@@ -185,4 +185,4 @@ def train_agent(
         if behavior_policy_pretrained is False:
             return action_policy_loss_log, behavior_policy_loss_log
         else:
-            return action_policy_loss
+            return action_policy_loss_log
