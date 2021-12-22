@@ -352,11 +352,11 @@ class RetailrocketEpisodeLoader(DataLoader):
         encoded = encoded * reward_seq.unsqueeze(1).expand(-1, encoded.size(1))
         return encoded
 
-    def _compute_return(self, rewards: Sequence[float]) -> np.float32:
+    def _compute_return(self, rewards: Sequence[float]) -> float:
         gammas = self.gamma ** np.arange(len(rewards))
-        return gammas @ np.array(rewards)
+        return float(gammas @ np.array(rewards))
 
-    def _compute_return_at_t(self, reward_episode: Sequence[float]) -> List[np.float32]:
+    def _compute_return_at_t(self, reward_episode: Sequence[float]) -> List[float]:
         return [
             self._compute_return(reward_episode[i:]) for i in range(len(reward_episode))
         ]

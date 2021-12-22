@@ -150,12 +150,12 @@ def train_agent(
                     pi_state=pi_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
                     beta_state=beta_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
                     item_index=(
-                        torch.LongTensor(batch["item_episodes"][b][1:ep_len])
+                        torch.LongTensor(list(batch["item_episodes"][b])[1:ep_len])
                         .view(ep_len - 1, 1)
                         .to(device)
                     ),
                     return_at_t=(
-                        torch.FloatTensor(batch["return_at_t"][b][1:ep_len])
+                        torch.FloatTensor(list(batch["return_at_t"][b])[1:ep_len])
                         .view(ep_len - 1, 1)
                         .to(device)
                     ),
