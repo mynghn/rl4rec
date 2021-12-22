@@ -142,19 +142,20 @@ class TopKOfflineREINFORCE(nn.Module):
         item_index (T-1, 1): Item indices meaning "action" at timestep (t+1) ~ (t+T-1)
         return_at_t (T-1, 1): Cumulative returns at timestmp (t+1) ~ (t+T-1)
         """
-        action_policy_probs_in_episode = torch.exp(
-            self.action_policy_head(pi_state, item_index)
+        action_policy_log_probs_in_episode = self.action_policy_head(
+            pi_state, item_index
         ).view(-1)
-        behavior_policy_probs_in_episode = torch.exp(
-            self.behavior_policy(beta_state, item_index)
+        behavior_policy_log_probs_in_episode = self.behavior_policy(
+            beta_state, item_index
         ).view(-1)
 
         episodic_return_cumulated = 0.0
         hist_len = item_index.size(0)
         for t in range(hist_len):
-            importance_weight = action_policy_probs_in_episode[t:] @ (
-                1 / behavior_policy_probs_in_episode[t:]
-            )
+            importance_weight = torch.exp(
+                action_policy_log_probs_in_episode[t:]
+                - behavior_policy_log_probs_in_episode[t:]
+            ).squeeze() @ torch.ones(hist_len - t)
             episodic_return_cumulated += (
                 importance_weight.cpu().item() * return_at_t[t, 0].cpu().item()
             )

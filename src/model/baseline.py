@@ -89,8 +89,8 @@ class GRU4Rec(nn.Module):
 
     def get_corrected_batch_return(
         self,
-        model_probs: torch.FloatTensor,
-        behavior_policy_probs: torch.FloatTensor,
+        model_log_probs: torch.FloatTensor,
+        behavior_policy_log_probs: torch.FloatTensor,
         lengths: torch.LongTensor,
         item_index: Sequence[Sequence[float]],
         return_at_t: Sequence[Sequence[float]],
@@ -101,9 +101,10 @@ class GRU4Rec(nn.Module):
             ep_return = 0.0
             for t in range(1, lengths[b] + 1):
                 item_index_in_episode = item_index[b][t:]
-                importance_weight = model_probs[b, t - 1, item_index_in_episode] @ (
-                    1 / behavior_policy_probs[b, t - 1, item_index_in_episode]
-                )
+                importance_weight = torch.exp(
+                    model_log_probs[b, t - 1, item_index_in_episode]
+                    - behavior_policy_log_probs[b, t - 1, item_index_in_episode]
+                ).squeeze() @ torch.ones(len(item_index_in_episode))
                 ep_return += importance_weight.cpu().item() * return_at_t[b][t]
             batch_return_cumulated += ep_return / lengths[b].cpu().item()
         return batch_return_cumulated / batch_size
