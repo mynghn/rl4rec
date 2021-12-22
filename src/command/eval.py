@@ -23,7 +23,7 @@ def evaluate_recommender(
 ) -> Dict[str, float]:
     model = model.to(device)
     model.eval()
-    kl_div_loss = KLDivLoss(reduction="mean", log_target=False)
+    kl_div_loss = KLDivLoss(reduction="batchmean", log_target=True)
 
     expected_return_cumulated = 0.0
     return_cumulated = 0.0
@@ -77,29 +77,27 @@ def evaluate_recommender(
                     )
 
                     # 2. KL Divergence between Agent's policy & former behavior policy
-                    behavior_policy_probs = torch.exp(
-                        model.behavior_policy(
-                            state=beta_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
-                            item_index=(
-                                torch.LongTensor(batch["item_episodes"][b][1:ep_len])
-                                .view(ep_len - 1, 1)
-                                .to(device)
-                            ),
-                        )
+                    behavior_policy_log_probs = model.behavior_policy(
+                        state=beta_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
+                        item_index=(
+                            torch.LongTensor(batch["item_episodes"][b][1:ep_len])
+                            .view(ep_len - 1, 1)
+                            .to(device)
+                        ),
                     )
-                    model_probs = torch.exp(
-                        model.action_policy_head(
-                            state=pi_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
-                            item_index=(
-                                torch.LongTensor(batch["item_episodes"][b][1:ep_len])
-                                .view(ep_len - 1, 1)
-                                .to(device)
-                            ),
-                        )
+                    model_log_probs = model.action_policy_head(
+                        state=pi_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
+                        item_index=(
+                            torch.LongTensor(batch["item_episodes"][b][1:ep_len])
+                            .view(ep_len - 1, 1)
+                            .to(device)
+                        ),
                     )
 
                     kl_div_cumulated += (
-                        kl_div_loss(model_probs, behavior_policy_probs).cpu().item()
+                        kl_div_loss(model_log_probs, behavior_policy_log_probs)
+                        .cpu()
+                        .item()
                     )
 
                     # 3. Compute metrics from traditional RecSys domain
@@ -163,16 +161,16 @@ def evaluate_recommender(
                 )
 
                 # 1. Expected return of model's policy over samples from eval data that follows behavior policy
-                batch_model_probs, _ = model.get_probs(batch["pack_padded_histories"])
+                batch_model_log_probs, _ = model.log_probs(
+                    batch["pack_padded_histories"]
+                )
                 beta_state, lengths = behavior_policy.struct_state(
                     batch["pack_padded_histories"]
                 )
-                batch_behavior_policy_probs = torch.exp(
-                    behavior_policy.log_probs(beta_state)
-                )
+                batch_behavior_policy_log_probs = behavior_policy.log_probs(beta_state)
                 expected_return_cumulated += model.get_corrected_batch_return(
-                    model_probs=batch_model_probs,
-                    behavior_policy_probs=batch_behavior_policy_probs,
+                    model_log_probs=batch_model_log_probs,
+                    behavior_policy_log_probs=batch_behavior_policy_log_probs,
                     lengths=lengths,
                     item_index=batch["item_episodes"],
                     return_at_t=batch["return_at_t"],
@@ -187,14 +185,16 @@ def evaluate_recommender(
                 for b in range(batch_size):
                     ep_len = lengths[b] + 1
                     # 2. KL Divergence between Agent's policy & former behavior policy
-                    behavior_policy_probs = batch_behavior_policy_probs[
+                    behavior_policy_log_probs = batch_behavior_policy_log_probs[
                         b, : ep_len - 1, batch["item_episodes"][b][1:ep_len]
                     ].view(ep_len - 1, -1)
-                    model_probs = batch_model_probs[
+                    model_log_probs = batch_model_log_probs[
                         b, : ep_len - 1, batch["item_episodes"][b][1:ep_len]
                     ].view(ep_len - 1, -1)
                     kl_div_cumulated += (
-                        kl_div_loss(model_probs, behavior_policy_probs).cpu().item()
+                        kl_div_loss(model_log_probs, behavior_policy_log_probs)
+                        .cpu()
+                        .item()
                     )
 
                     ep_cnt += 1
