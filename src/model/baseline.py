@@ -101,10 +101,12 @@ class GRU4Rec(nn.Module):
             ep_return = 0.0
             for t in range(1, lengths[b] + 1):
                 item_index_in_episode = item_index[b][t:]
-                importance_weight = torch.exp(
-                    model_log_probs[b, t - 1, item_index_in_episode]
-                    - behavior_policy_log_probs[b, t - 1, item_index_in_episode]
-                ).squeeze() @ torch.ones(len(item_index_in_episode))
+                importance_weight = torch.prod(
+                    torch.exp(
+                        model_log_probs[b, t - 1, item_index_in_episode]
+                        - behavior_policy_log_probs[b, t - 1, item_index_in_episode]
+                    ).squeeze()
+                )
                 ep_return += importance_weight.cpu().item() * return_at_t[b][t]
             batch_return_cumulated += ep_return / lengths[b].cpu().item()
         return batch_return_cumulated / batch_size
