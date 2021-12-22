@@ -105,7 +105,7 @@ class GRU4Rec(nn.Module):
                     1 / behavior_policy_probs[b, t - 1, item_index_in_episode]
                 )
                 ep_return += importance_weight.cpu().item() * return_at_t[b][t]
-            batch_return_cumulated += ep_return / lengths[b]
+            batch_return_cumulated += ep_return / lengths[b].cpu().item()
         return batch_return_cumulated / batch_size
 
 
