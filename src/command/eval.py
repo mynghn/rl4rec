@@ -1,7 +1,6 @@
 from collections import defaultdict
 from typing import DefaultDict, Dict, List, Optional, Union
 
-import numpy as np
 import torch
 from torch.nn.modules.loss import KLDivLoss
 from tqdm import tqdm
@@ -15,7 +14,6 @@ from ..model.policy import BehaviorPolicy
 def evaluate_recommender(
     model: Union[TopKOfflineREINFORCE, GRU4Rec],
     eval_loader: RetailrocketEpisodeLoader,
-    discount_factor: float,
     device: torch.device = torch.device("cpu"),
     debug: bool = False,
     K: int = None,
@@ -112,7 +110,7 @@ def evaluate_recommender(
                     ):
                         recommendation_list = recommendations.tolist()
                         actual_seq = list(batch["item_episodes"][b])[t:]
-                        reward_seq = list(batch["return_at_t"][b])[t:]
+                        return_seq = list(batch["return_at_t"][b])[t:]
                         actual_item_set = set(actual_seq)
                         recommendation_set = set(recommendation_list)
 
@@ -126,8 +124,7 @@ def evaluate_recommender(
                             recommendations=recommendation_list,
                             relevance_book=build_relevance_book(
                                 item_sequence=actual_seq,
-                                reward_sequence=reward_seq,
-                                discount_factor=discount_factor,
+                                return_sequence=return_seq,
                             ),
                         )
 
@@ -204,7 +201,7 @@ def evaluate_recommender(
                     ):
                         recommendation_list = recommendations.tolist()
                         actual_seq = list(batch["item_episodes"][b])[t:]
-                        reward_seq = list(batch["return_at_t"][b])[t:]
+                        return_seq = list(batch["return_at_t"][b])[t:]
                         actual_item_set = set(actual_seq)
                         recommendation_set = set(recommendation_list)
 
@@ -218,8 +215,7 @@ def evaluate_recommender(
                             recommendations=recommendation_list,
                             relevance_book=build_relevance_book(
                                 item_sequence=actual_seq,
-                                reward_sequence=reward_seq,
-                                discount_factor=discount_factor,
+                                return_sequence=return_seq,
                             ),
                         )
 
@@ -285,15 +281,14 @@ def compute_ndcg(
 
 
 def build_relevance_book(
-    item_sequence: List[int], reward_sequence: List[float], discount_factor: float
+    item_sequence: List[int], return_sequence: List[float]
 ) -> DefaultDict[int, float]:
     assert len(item_sequence) == len(
-        reward_sequence
+        return_sequence
     ), "Item and reward sequence length should match."
 
-    gammas = (1.0 - discount_factor) ** np.arange(len(item_sequence))
     relevance_book = defaultdict(float)
-    for gamma, item_index, reward in zip(gammas, item_sequence, reward_sequence):
-        relevance_book[item_index] += reward * gamma
+    for item_index, _return in zip(item_sequence, return_sequence):
+        relevance_book[item_index] += _return
 
     return relevance_book
