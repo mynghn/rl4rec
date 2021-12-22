@@ -26,6 +26,7 @@ def evaluate_recommender(
     kl_div_loss = KLDivLoss(reduction="mean", log_target=False)
 
     expected_return_cumulated = 0.0
+    return_cumulated = 0.0
     kl_div_cumulated = 0.0
     precision_cumulated = 0.0
     recall_cumulated = 0.0
@@ -42,6 +43,8 @@ def evaluate_recommender(
             ep_cnt = 0
             for batch in tqdm(eval_loader, desc="eval"):
                 batch = eval_loader.to(batch=batch, device=device)
+
+                return_cumulated += sum([sum(ep) for ep in batch["return_at_t"]])
 
                 # Build States
                 beta_state, _ = model.behavior_policy.struct_state(
@@ -71,6 +74,7 @@ def evaluate_recommender(
                         ),
                     )
 
+                    # 2. KL Divergence between Agent's policy & former behavior policy
                     behavior_policy_probs = torch.exp(
                         model.behavior_policy(
                             state=beta_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
@@ -92,7 +96,6 @@ def evaluate_recommender(
                         )
                     )
 
-                    # 2. KL Divergence between Agent's policy & former behavior policy
                     kl_div_cumulated += (
                         kl_div_loss(model_probs, behavior_policy_probs).cpu().item()
                     )
@@ -152,6 +155,8 @@ def evaluate_recommender(
             ep_cnt = 0
             for batch in tqdm(eval_loader, desc="eval"):
                 batch = eval_loader.to(batch=batch, device=device)
+
+                return_cumulated += sum([sum(ep) for ep in batch["return_at_t"]])
 
                 # 1. Expected return of model's policy over samples from eval data that follows behavior policy
                 batch_model_probs, _ = model.get_probs(batch["pack_padded_histories"])
@@ -237,13 +242,16 @@ def evaluate_recommender(
             raise TypeError("Unregistered recommender type encountered.")
 
     return {
-        "E[Return]": expected_return,
+        "E_pi[Return]": expected_return,
+        "E_beta[Return]": return_cumulated / iter_cnt,
         "KL-Divergence(Pi|Beta)": kl_div,
         f"Precision at {K}": precision_cumulated / iter_cnt,
         f"Recall at {K}": recall_cumulated / iter_cnt,
         f"nDCG at {K}": ndcg_cumulated / iter_cnt,
         "Hit Rate": hit / iter_cnt,
         "User Hit Rate": len(users_hit) / len(users_total),
+        "# of Users Tested": len(users_total),
+        "# of Recommendations Tested": iter_cnt,
     }
 
 
