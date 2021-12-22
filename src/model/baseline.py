@@ -109,7 +109,7 @@ class GRU4Rec(nn.Module):
                 )
                 ep_return += importance_weight.cpu().item() * return_at_t[b][t]
             batch_return_cumulated += ep_return / lengths[b].cpu().item()
-        return batch_return_cumulated / batch_size
+        return batch_return_cumulated
 
 
 class CollaborativeFiltering:

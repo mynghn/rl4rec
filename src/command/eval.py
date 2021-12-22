@@ -151,7 +151,6 @@ def evaluate_recommender(
 
         elif isinstance(model, GRU4Rec):
             assert behavior_policy is not None and K is not None
-            batch_cnt = 0
             ep_cnt = 0
             for batch in tqdm(eval_loader, desc="eval"):
                 batch = eval_loader.to(batch=batch, device=device)
@@ -238,9 +237,8 @@ def evaluate_recommender(
                         iter_cnt += 1
 
                 users_total |= set(batch["user_id"])
-                batch_cnt += 1
 
-            expected_return = expected_return_cumulated / batch_cnt
+            expected_return = expected_return_cumulated / ep_cnt
             kl_div = kl_div_cumulated / ep_cnt
         else:
             raise TypeError("Unregistered recommender type encountered.")
