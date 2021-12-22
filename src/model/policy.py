@@ -115,7 +115,7 @@ class BehaviorPolicy(GRU4Rec):
 
     def log_probs(self, state: torch.FloatTensor) -> torch.FloatTensor:
         logits = self.output_layer(state)
-        return torch.log(self.softmax(logits))
+        return torch.log(self.softmax(logits + 1e-8))
 
     def struct_state(self, pack_padded_histories: PackedSequence) -> torch.FloatTensor:
         return self.gru_layer(pack_padded_histories)
