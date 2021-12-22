@@ -44,7 +44,9 @@ def evaluate_recommender(
             for batch in tqdm(eval_loader, desc="eval"):
                 batch = eval_loader.to(batch=batch, device=device)
 
-                return_cumulated += sum([sum(ep) for ep in batch["return_at_t"]])
+                return_cumulated += sum(
+                    [sum(ep[1:]) / len(ep[1:]) for ep in batch["return_at_t"]]
+                )
 
                 # Build States
                 beta_state, _ = model.behavior_policy.struct_state(
@@ -156,7 +158,9 @@ def evaluate_recommender(
             for batch in tqdm(eval_loader, desc="eval"):
                 batch = eval_loader.to(batch=batch, device=device)
 
-                return_cumulated += sum([sum(ep) for ep in batch["return_at_t"]])
+                return_cumulated += sum(
+                    [sum(ep[1:]) / len(ep[1:]) for ep in batch["return_at_t"]]
+                )
 
                 # 1. Expected return of model's policy over samples from eval data that follows behavior policy
                 batch_model_probs, _ = model.get_probs(batch["pack_padded_histories"])
@@ -243,7 +247,7 @@ def evaluate_recommender(
 
     return {
         "E_pi[Return]": expected_return,
-        "E_beta[Return]": return_cumulated / iter_cnt,
+        "E_beta[Return]": return_cumulated / ep_cnt,
         "KL-Divergence(Pi|Beta)": kl_div,
         f"Precision at {K}": precision_cumulated / iter_cnt,
         f"Recall at {K}": recall_cumulated / iter_cnt,
