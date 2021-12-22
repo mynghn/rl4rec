@@ -60,12 +60,12 @@ def evaluate_recommender(
                         pi_state=pi_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
                         beta_state=beta_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
                         item_index=(
-                            torch.LongTensor(batch["item_episodes"][b][1:ep_len])
+                            torch.LongTensor(list(batch["item_episodes"][b])[1:ep_len])
                             .view(ep_len - 1, 1)
                             .to(device)
                         ),
                         return_at_t=(
-                            torch.FloatTensor(batch["return_at_t"][b][1:ep_len])
+                            torch.FloatTensor(list(batch["return_at_t"][b])[1:ep_len])
                             .view(ep_len - 1, 1)
                             .to(device)
                         ),
@@ -108,8 +108,8 @@ def evaluate_recommender(
                         range(1, ep_len), batch["user_id"], recommended_item_indices
                     ):
                         recommendation_list = recommendations.tolist()
-                        actual_seq = batch["item_episodes"][b][t:]
-                        reward_seq = batch["return_at_t"][b][t:]
+                        actual_seq = list(batch["item_episodes"][b])[t:]
+                        reward_seq = list(batch["return_at_t"][b])[t:]
                         actual_item_set = set(actual_seq)
                         recommendation_set = set(recommendation_list)
 
@@ -195,8 +195,8 @@ def evaluate_recommender(
                         range(1, ep_len), batch["user_id"], recommended_item_indices[b]
                     ):
                         recommendation_list = recommendations.tolist()
-                        actual_seq = batch["item_episodes"][b][t:]
-                        reward_seq = batch["return_at_t"][b][t:]
+                        actual_seq = list(batch["item_episodes"][b])[t:]
+                        reward_seq = list(batch["return_at_t"][b])[t:]
                         actual_item_set = set(actual_seq)
                         recommendation_set = set(recommendation_list)
 
