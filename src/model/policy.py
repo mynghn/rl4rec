@@ -35,7 +35,7 @@ class SoftmaxStochasticPolicyHead(nn.Module):
                 item_embedding_dim is not None
             ), "Item embedding dimension should be provided for full softmax."
 
-            self.softmax = nn.Softmax(dim=1)
+            self.softmax = nn.Softmax(dim=-1)
             self.item_space = torch.arange(n_items)
             self.item_embeddings = nn.Embedding(
                 num_embeddings=n_items,
@@ -97,7 +97,7 @@ class BehaviorPolicy(GRU4Rec):
             padding_signal=padding_signal,
         )
 
-        self.softmax = nn.Softmax(dim=1)
+        self.softmax = nn.Softmax(dim=-1)
 
     def forward(
         self, state: torch.FloatTensor, item_index: torch.LongTensor

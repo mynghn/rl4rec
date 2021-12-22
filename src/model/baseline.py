@@ -85,7 +85,7 @@ class GRU4Rec(nn.Module):
 
     def log_probs(self, pack_padded_histories: PackedSequence) -> torch.FloatTensor:
         logits, lengths = self(pack_padded_histories)
-        return torch.log(softmax(logits) + 1e-8), lengths
+        return torch.log(softmax(logits, dim=-1) + 1e-8), lengths
 
     def get_corrected_batch_return(
         self,
