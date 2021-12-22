@@ -26,7 +26,7 @@ def train_GRU4Rec(
     train_loss_log = []
     for epoch in range(1, n_epochs + 1):
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        print(f"\nEpoch {epoch} for {model._get_name()} started at: {start_time}\n")
+        print(f"\nEpoch {epoch} for {model._get_name()}\nstarted at: {start_time}\n")
 
         iter_cnt = 0
         for batch in tqdm(train_loader, desc="train"):
@@ -72,7 +72,7 @@ def train_GRU4Rec(
                 torch.cuda.empty_cache()
 
         if debug is True:
-            print(f"Epoch {epoch} Final loss: {loss.cpu().item()}")
+            print(f"\nFinal loss: {loss.cpu().item()}")
 
         print("=" * 80)
 
@@ -177,7 +177,7 @@ def train_agent(
                 torch.cuda.empty_cache()
 
         if debug is True:
-            print(f"Final action policy loss: {action_policy_loss.cpu().item()}")
+            print(f"\nFinal loss: {action_policy_loss.cpu().item()}")
 
         print("=" * 80)
 
