@@ -90,7 +90,7 @@ def train_agent(
     debug: bool = False,
     behavior_policy_pretrained: bool = False,
     behavior_policy_optimizer: Optimizer = None,
-) -> Optional[Tuple[List[float], List[float]]]:
+) -> Optional[Union[Tuple[List[float], List[float]], List[float]]]:
     if isinstance(n_epochs, int):
         n_epochs_beta = n_epochs_pi = n_epochs
     elif isinstance(n_epochs, tuple):
@@ -182,4 +182,7 @@ def train_agent(
         print("=" * 80)
 
     if debug is True:
-        return action_policy_loss_log, behavior_policy_loss_log
+        if behavior_policy_pretrained is False:
+            return action_policy_loss_log, behavior_policy_loss_log
+        else:
+            return action_policy_loss
