@@ -83,9 +83,9 @@ class GRU4Rec(nn.Module):
             recommendations.append(ep_recom)
         return recommendations
 
-    def get_probs(self, pack_padded_histories: PackedSequence) -> torch.FloatTensor:
+    def log_probs(self, pack_padded_histories: PackedSequence) -> torch.FloatTensor:
         logits, lengths = self(pack_padded_histories)
-        return softmax(logits), lengths
+        return torch.log(softmax(logits) + 1e-8), lengths
 
     def get_corrected_batch_return(
         self,
