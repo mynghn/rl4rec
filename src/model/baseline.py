@@ -102,12 +102,21 @@ class GRU4Rec(nn.Module):
             for t in range(1, lengths[b] + 1):
                 item_index_in_episode = item_index[b][t:]
                 importance_weight = torch.prod(
-                    torch.exp(
-                        model_log_probs[b, t - 1, item_index_in_episode]
-                        - behavior_policy_log_probs[b, t - 1, item_index_in_episode]
-                    ).squeeze()
+                    torch.minimum(
+                        (
+                            torch.exp(
+                                model_log_probs[b, t - 1, item_index_in_episode]
+                                - behavior_policy_log_probs[
+                                    b, t - 1, item_index_in_episode
+                                ]
+                            )
+                            .cpu()
+                            .squeeze()
+                        ),
+                        torch.FloatTensor([10.0]),
+                    )
                 )
-                ep_return += importance_weight.cpu().item() * return_at_t[b][t]
+                ep_return += importance_weight.item() * return_at_t[b][t]
             batch_return_cumulated += ep_return / lengths[b].cpu().item()
         return batch_return_cumulated
 
