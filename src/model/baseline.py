@@ -74,10 +74,10 @@ class GRU4Rec(nn.Module):
     ) -> List[List[List[int]]]:
         out, lengths = self.forward(pack_padded_histories)
         recommendations = []
-        for ep_logits, length in zip(out, lengths):
+        for b in range(lengths.size(0)):
             ep_recom = []
-            for i in range(length):
-                sorted_indices = ep_logits[i, :].argsort(dim=1, descending=True)
+            for i in range(lengths[b]):
+                sorted_indices = out[b, i, :].view(-1).argsort(descending=True)
                 items = sorted_indices[:K]
                 ep_recom.append(items)
             recommendations.append(ep_recom)
