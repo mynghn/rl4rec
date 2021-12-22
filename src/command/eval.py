@@ -59,28 +59,36 @@ def evaluate_recommender(
                     expected_return_cumulated += model.get_corrected_episodic_return(
                         pi_state=pi_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
                         beta_state=beta_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
-                        item_index=torch.LongTensor(
-                            batch["item_episodes"][b][1:ep_len]
-                        ).view(ep_len - 1, 1),
-                        return_at_t=torch.FloatTensor(
-                            batch["return_at_t"][b][1:ep_len]
-                        ).view(ep_len - 1, 1),
+                        item_index=(
+                            torch.LongTensor(batch["item_episodes"][b][1:ep_len])
+                            .view(ep_len - 1, 1)
+                            .to(device)
+                        ),
+                        return_at_t=(
+                            torch.FloatTensor(batch["return_at_t"][b][1:ep_len])
+                            .view(ep_len - 1, 1)
+                            .to(device)
+                        ),
                     )
 
                     behavior_policy_probs = torch.exp(
                         model.behavior_policy(
                             state=beta_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
-                            item_index=torch.LongTensor(
-                                batch["item_episodes"][b][1:ep_len]
-                            ).view(ep_len - 1, 1),
+                            item_index=(
+                                torch.LongTensor(batch["item_episodes"][b][1:ep_len])
+                                .view(ep_len - 1, 1)
+                                .to(device)
+                            ),
                         )
                     )
                     model_probs = torch.exp(
                         model.action_policy_head(
                             state=pi_state[b, : ep_len - 1, :].view(ep_len - 1, -1),
-                            item_index=torch.LongTensor(
-                                batch["item_episodes"][b][1:ep_len]
-                            ).view(ep_len - 1, 1),
+                            item_index=(
+                                torch.LongTensor(batch["item_episodes"][b][1:ep_len])
+                                .view(ep_len - 1, 1)
+                                .to(device)
+                            ),
                         )
                     )
 
