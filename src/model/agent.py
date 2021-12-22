@@ -144,10 +144,10 @@ class TopKOfflineREINFORCE(nn.Module):
         """
         action_policy_probs_in_episode = torch.exp(
             self.action_policy_head(pi_state, item_index)
-        ).squeeze()
+        ).view(-1)
         behavior_policy_probs_in_episode = torch.exp(
             self.behavior_policy(beta_state, item_index)
-        ).squeeze()
+        ).view(-1)
 
         episodic_return_cumulated = 0.0
         hist_len = item_index.size(0)
