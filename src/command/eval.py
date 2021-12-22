@@ -98,7 +98,7 @@ def evaluate_recommender(
                     )
 
                     # 3. Compute metrics from traditional RecSys domain
-                    recommended_item_indices = model.get_top_recommendations(
+                    recommended_item_indices, _ = model.get_top_recommendations(
                         pi_state[b, : ep_len - 1, :].view(ep_len - 1, -1), M=K
                     )
 
