@@ -9,8 +9,6 @@ from torch.nn.functional import one_hot
 from torch.nn.utils.rnn import PackedSequence, pack_padded_sequence
 from torch.utils.data import DataLoader, Dataset
 
-from .custom_typings import PaddedNSortedEpisodeBatch
-
 
 class RetailrocketEpisodeDataset(Dataset):
     events_fetching_dtypes = {
@@ -207,107 +205,6 @@ class RetailrocketEpisodeDataset(Dataset):
         return self.episodes[idx]
 
 
-class RetailrocketDataLoader(DataLoader):
-    padding_signal = -1
-
-    def __init__(self, train: bool, *args, **kargs):
-        self.train = train
-        if self.train is True:
-            super().__init__(collate_fn=self.train_collate_func, *args, **kargs)
-        else:
-            super().__init__(collate_fn=self.eval_collate_func, *args, **kargs)
-
-    def pad_sequence(
-        self, user_history: Sequence[Sequence[int]]
-    ) -> Tuple[torch.LongTensor, torch.LongTensor]:
-        lengths = torch.LongTensor([len(seq) for seq in user_history])
-        max_length = lengths.max()
-        padded = torch.stack(
-            [
-                torch.cat(
-                    [
-                        torch.LongTensor(item_seq),
-                        torch.zeros(max_length - len(item_seq)) + self.padding_signal,
-                    ]
-                ).long()
-                for item_seq in user_history
-            ]
-        )
-        return padded, lengths
-
-    def train_collate_func(
-        self, batch: List[np.ndarray]
-    ) -> Dict[
-        str,
-        Union[
-            PaddedNSortedEpisodeBatch,
-            torch.LongTensor,
-            torch.FloatTensor,
-        ],
-    ]:
-        batch_size = len(batch)
-        user_history, item_index, _return = tuple(np.array(batch, dtype=object).T)
-
-        padded_user_history, lengths = self.pad_sequence(user_history)
-        sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
-
-        return {
-            "user_history": PaddedNSortedEpisodeBatch(
-                data=padded_user_history[sorted_idx],
-                lengths=sorted_lengths,
-            ),
-            "item_index": torch.from_numpy(
-                item_index[sorted_idx].astype(np.int64)
-            ).view(batch_size, -1),
-            "return": torch.from_numpy(_return[sorted_idx].astype(np.float32)).view(
-                batch_size, -1
-            ),
-        }
-
-    def eval_collate_func(
-        self, batch: List[np.ndarray]
-    ) -> Dict[
-        str,
-        Union[
-            List[str],
-            PaddedNSortedEpisodeBatch,
-            List[List[int]],
-            List[List[float]],
-        ],
-    ]:
-        user_id, user_history, item_index_episode, reward_episode, _return = tuple(
-            np.array(batch, dtype=object).T
-        )
-
-        padded_user_history, lengths = self.pad_sequence(user_history)
-        sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
-
-        return {
-            "user_id": list(user_id[sorted_idx]),
-            "user_history": PaddedNSortedEpisodeBatch(
-                data=padded_user_history[sorted_idx],
-                lengths=sorted_lengths,
-            ),
-            "item_index_episode": list(item_index_episode[sorted_idx]),
-            "reward_episode": list(reward_episode[sorted_idx]),
-            "return": torch.from_numpy(_return[sorted_idx].astype(np.float32)).view(
-                len(batch), -1
-            ),
-        }
-
-    def to(self, batch: Dict, device: torch.device) -> Dict:
-        if self.train:
-            return {k: v.to(device) for k, v in batch.items()}
-        else:
-            non_tensors = ("user_id", "item_index_episode", "reward_episode")
-            batch_on_device = {
-                k: v.to(device) for k, v in batch.items() if k not in non_tensors
-            }
-            for k in non_tensors:
-                batch_on_device[k] = batch[k]
-            return batch_on_device
-
-
 class RetailrocketEpisodeLoader(DataLoader):
     def __init__(
         self,
@@ -377,7 +274,10 @@ class RetailrocketEpisodeLoader(DataLoader):
         sorted_lengths, sorted_idx = lengths.sort(0, descending=True)
 
         return_at_t = np.array(
-            [self._compute_return_at_t(reward_ep) for reward_ep in reward_episodes],
+            [
+                list(self._compute_return_at_t(reward_ep))
+                for reward_ep in reward_episodes
+            ],
             dtype=object,
         )
 
