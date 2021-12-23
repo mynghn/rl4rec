@@ -152,12 +152,10 @@ class TopKOfflineREINFORCE(nn.Module):
         episodic_return_cumulated = 0.0
         hist_len = item_index.size(0)
         for t in range(hist_len):
-            importance_weight = torch.prod(
-                torch.exp(
-                    action_policy_log_probs_in_episode[t:]
-                    - behavior_policy_log_probs_in_episode[t:]
-                ).squeeze()
-            )
+            importance_weight = torch.exp(
+                action_policy_log_probs_in_episode[t]
+                - behavior_policy_log_probs_in_episode[t]
+            ).squeeze()
             episodic_return_cumulated += (
                 importance_weight.cpu().item() * return_at_t[t, 0].cpu().item()
             )
