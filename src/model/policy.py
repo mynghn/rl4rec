@@ -14,7 +14,6 @@ class SoftmaxStochasticPolicyHead(nn.Module):
         adaptive_softmax: bool,
         state_vector_dim: int = None,
         softmax_cutoffs: Sequence = None,
-        item_embedding_dim: int = None,
         softmax_temperature: float = 1.0,
     ):
         super(SoftmaxStochasticPolicyHead, self).__init__()
@@ -32,14 +31,14 @@ class SoftmaxStochasticPolicyHead(nn.Module):
             )
         else:
             assert (
-                item_embedding_dim is not None
+                state_vector_dim is not None
             ), "Item embedding dimension should be provided for full softmax."
 
             self.softmax = nn.Softmax(dim=-1)
             self.item_space = torch.arange(n_items)
             self.item_embeddings = nn.Embedding(
                 num_embeddings=n_items,
-                embedding_dim=item_embedding_dim,
+                embedding_dim=state_vector_dim,
             )
             self.T = softmax_temperature
 
